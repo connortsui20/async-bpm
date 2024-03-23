@@ -8,7 +8,7 @@ pub(crate) use crate::page::page_inner::Page;
 
 pub const PAGE_SIZE: usize = 1 << 12;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PageId {
     inner: u64,
 }

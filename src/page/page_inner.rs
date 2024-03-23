@@ -54,10 +54,18 @@ impl Page {
             return;
         }
 
-        if let Some(frame) = self.bpm.free_frames.pop() {
-            todo!()
+        if let Some(mut frame) = self.bpm.free_frames.pop() {
+            let pages_guard = self.bpm.pages.read().await;
+            let current_page_ptr = pages_guard
+                .get(&self.pid)
+                .expect("Couldn't find ourselves in the global table of pages");
+
+            assert!(frame.parent.is_none());
+            frame.parent.replace(current_page_ptr.clone());
+
+            todo!("Read our page's data from disk via a disk manager and await")
         }
 
-        todo!()
+        todo!("Else we need to evict")
     }
 }

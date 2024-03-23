@@ -2,8 +2,8 @@ use crate::page::{Page, PAGE_SIZE};
 use std::sync::Arc;
 
 pub struct Frame {
-    buf: Vec<u8>, // TODO fix
-    parent: Option<Arc<Page>>,
+    pub(crate) buf: Vec<u8>, // TODO fix
+    pub(crate) parent: Option<Arc<Page>>,
 }
 
 impl Default for Frame {
