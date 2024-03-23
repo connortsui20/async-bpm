@@ -9,7 +9,8 @@ use std::{
 use tokio::sync::RwLockWriteGuard;
 
 pub struct PageHandle {
-    page: Arc<Page>,
+    pub(crate) page: Arc<Page>,
+    // uring: Rc<IoUringAsync>,
 }
 
 impl PageHandle {
