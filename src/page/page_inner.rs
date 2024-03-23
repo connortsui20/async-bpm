@@ -1,6 +1,7 @@
 use super::{
     eviction::{Temperature, HOT},
     page_guard::{ReadPageGuard, WritePageGuard},
+    PageId,
 };
 use crate::{bpm::BufferPoolManager, frame::Frame};
 use std::{
@@ -12,12 +13,17 @@ use tokio::sync::{RwLock, RwLockWriteGuard};
 type PageInner = Option<Frame>;
 
 pub(crate) struct Page {
+    pid: PageId,
     eviction_state: Temperature,
     inner: RwLock<PageInner>, // TODO change to hybrid latch
     bpm: Arc<BufferPoolManager>,
 }
 
 impl Page {
+    pub fn id(&self) -> PageId {
+        self.pid
+    }
+
     pub(crate) async fn read(&self) -> ReadPageGuard {
         self.eviction_state.store(HOT, Ordering::Release);
 

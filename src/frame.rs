@@ -1,4 +1,4 @@
-use crate::{page::Page, PAGE_SIZE};
+use crate::page::{Page, PAGE_SIZE};
 use std::sync::Arc;
 
 pub struct Frame {
