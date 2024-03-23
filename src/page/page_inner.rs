@@ -48,6 +48,10 @@ impl Page {
             return;
         }
 
+        if let Some(frame) = self.bpm.free_frames.pop() {
+            todo!()
+        }
+
         todo!()
     }
 }
