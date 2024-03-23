@@ -24,9 +24,8 @@ impl PageHandle {
             return ReadPageGuard::new(read_guard);
         }
 
+        // We need to load the page into memory with a write guard
         drop(read_guard);
-
-        // We need to load the page into memory
         let mut write_guard = self.page.inner.write().await;
 
         self.load(&mut write_guard).await;
@@ -35,7 +34,18 @@ impl PageHandle {
     }
 
     pub(crate) async fn write(&self) -> WritePageGuard {
-        todo!()
+        self.page.eviction_state.store(HOT, Ordering::Release);
+
+        let mut write_guard = self.page.inner.write().await;
+
+        // If it is already loaded, then we're done
+        if write_guard.deref().is_some() {
+            return WritePageGuard::new(write_guard);
+        }
+
+        self.load(&mut write_guard).await;
+
+        WritePageGuard::new(write_guard)
     }
 
     async fn load(&self, guard: &mut RwLockWriteGuard<'_, Option<Frame>>) {
