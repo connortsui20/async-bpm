@@ -16,15 +16,51 @@ pub(super) enum Lifecycle {
 }
 
 #[derive(Clone)]
-struct OpInner {
+pub(super) struct OpInner {
     slab: Rc<RefCell<Slab<Lifecycle>>>,
-    index: u64,
+    id: u64,
 }
 
 /// A wrapper around an optionally owned `OpInner` type.
 pub struct Op {
     /// Ownership over the `OpInner` value is moved to a new tokio task when an `Op` is dropped.
     inner: Option<OpInner>,
+}
+
+impl Future for OpInner {
+    type Output = CqEntry;
+
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let mut guard = self.slab.borrow_mut();
+
+        // We are only ready once the lifecycle is in the `Completed` state
+        let lifecycle = &mut guard[self.id as usize];
+        match lifecycle {
+            Lifecycle::Unsubmitted => {
+                *lifecycle = Lifecycle::Waiting(cx.waker().clone());
+                std::task::Poll::Pending
+            }
+            Lifecycle::Waiting(_) => {
+                *lifecycle = Lifecycle::Waiting(cx.waker().clone());
+                std::task::Poll::Pending
+            }
+            Lifecycle::Completed(cqe) => std::task::Poll::Ready(cqe.clone()),
+        }
+    }
+}
+
+impl Drop for OpInner {
+    fn drop(&mut self) {
+        let mut guard = self.slab.borrow_mut();
+        let lifecycle = guard.remove(self.id as usize);
+
+        let Lifecycle::Completed(_) = &lifecycle else {
+            unreachable!("`OpInner` was dropped before completing its operation");
+        };
+    }
 }
 
 impl Future for Op {
@@ -47,48 +83,12 @@ impl Drop for Op {
         let inner = self.inner.take().unwrap();
         let guard = inner.slab.borrow();
 
-        match &guard[inner.index as usize] {
+        match &guard[inner.id as usize] {
             Lifecycle::Completed(_) => {}
             _ => {
                 drop(guard);
                 tokio::task::spawn_local(inner);
             }
         }
-    }
-}
-
-impl Future for OpInner {
-    type Output = CqEntry;
-
-    fn poll(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        let mut guard = self.slab.borrow_mut();
-
-        // We are only ready once the lifecycle is in the `Completed` state
-        let lifecycle = &mut guard[self.index as usize];
-        match lifecycle {
-            Lifecycle::Unsubmitted => {
-                *lifecycle = Lifecycle::Waiting(cx.waker().clone());
-                std::task::Poll::Pending
-            }
-            Lifecycle::Waiting(_) => {
-                *lifecycle = Lifecycle::Waiting(cx.waker().clone());
-                std::task::Poll::Pending
-            }
-            Lifecycle::Completed(cqe) => std::task::Poll::Ready(cqe.clone()),
-        }
-    }
-}
-
-impl Drop for OpInner {
-    fn drop(&mut self) {
-        let mut guard = self.slab.borrow_mut();
-        let lifecycle = guard.remove(self.index as usize);
-
-        let Lifecycle::Completed(_) = &lifecycle else {
-            unreachable!("`OpInner` was dropped before completing its operation");
-        };
     }
 }
