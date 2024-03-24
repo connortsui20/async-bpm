@@ -1,6 +1,6 @@
 use io_uring::cqueue::Entry as CqEntry;
-use slab::Slab;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::future::Future;
 use std::rc::Rc;
 
@@ -17,14 +17,15 @@ pub(super) enum Lifecycle {
 
 #[derive(Clone)]
 pub(super) struct OpInner {
-    slab: Rc<RefCell<Slab<Lifecycle>>>,
-    id: u64,
+    pub(super) operations: Rc<RefCell<HashMap<u64, Lifecycle>>>,
+    /// A unique ID to an `io_uring` operation
+    pub(super) id: u64,
 }
 
 /// A wrapper around an optionally owned `OpInner` type.
 pub struct Op {
     /// Ownership over the `OpInner` value is moved to a new tokio task when an `Op` is dropped.
-    inner: Option<OpInner>,
+    pub(super) inner: Option<OpInner>,
 }
 
 impl Future for OpInner {
@@ -34,10 +35,13 @@ impl Future for OpInner {
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
-        let mut guard = self.slab.borrow_mut();
+        let mut guard = self.operations.borrow_mut();
+
+        // This is safe to unwrap since we only remove the `Lifecycle` from the table after we get
+        // dropped by our parent `Op`
+        let lifecycle = guard.get_mut(&self.id).unwrap();
 
         // We are only ready once the lifecycle is in the `Completed` state
-        let lifecycle = &mut guard[self.id as usize];
         match lifecycle {
             Lifecycle::Unsubmitted => {
                 *lifecycle = Lifecycle::Waiting(cx.waker().clone());
@@ -54,10 +58,10 @@ impl Future for OpInner {
 
 impl Drop for OpInner {
     fn drop(&mut self) {
-        let mut guard = self.slab.borrow_mut();
-        let lifecycle = guard.remove(self.id as usize);
+        let mut guard = self.operations.borrow_mut();
+        let lifecycle = guard.remove(&self.id);
 
-        let Lifecycle::Completed(_) = &lifecycle else {
+        let Some(Lifecycle::Completed(_)) = &lifecycle else {
             unreachable!("`OpInner` was dropped before completing its operation");
         };
     }
@@ -81,9 +85,11 @@ impl Future for Op {
 impl Drop for Op {
     fn drop(&mut self) {
         let inner = self.inner.take().unwrap();
-        let guard = inner.slab.borrow();
+        let guard = inner.operations.borrow();
 
-        match &guard[inner.id as usize] {
+        // This is safe to unwrap since we only remove the `Lifecycle` from the table after the
+        // `OpInner` gets dropped
+        match guard.get(&inner.id).unwrap() {
             Lifecycle::Completed(_) => {}
             _ => {
                 drop(guard);
