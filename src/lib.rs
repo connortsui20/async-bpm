@@ -2,4 +2,5 @@
 
 pub mod bpm;
 pub mod frame;
+pub mod io_channel;
 pub mod page;
