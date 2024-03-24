@@ -1,5 +1,4 @@
 use std::{collections::HashMap, sync::Arc};
-
 use crate::{
     frame::Frame,
     io::IoUringAsync,
@@ -8,17 +7,18 @@ use crate::{
 use crossbeam_queue::ArrayQueue;
 use tokio::sync::RwLock;
 
+/// A parallel Buffer Pool Manager that manages bringing logical pages from disk into memory via
+/// shared and fixed buffer frames.
 pub struct BufferPoolManager {
-    pub(crate) frames: Vec<Frame>,
+    pub(crate) frames: Vec<Frame>, // TODO register frames via IoSlice
     pub(crate) free_frames: ArrayQueue<Frame>,
     pub(crate) pages: RwLock<HashMap<PageId, Arc<Page>>>,
     num_frames: usize,
 }
 
 impl BufferPoolManager {
-    /// Constructs a new buffer pool manager
+    /// Constructs a new buffer pool manager.
     pub fn new(num_frames: usize) -> Self {
-        // TODO create proper IoSlice frames
         Self {
             frames: (0..num_frames).map(|_| Frame::default()).collect(),
             free_frames: ArrayQueue::new(num_frames),
@@ -27,6 +27,7 @@ impl BufferPoolManager {
         }
     }
 
+    /// Gets the number of fixed frames the buffer pool manages.
     pub fn num_frames(&self) -> usize {
         self.num_frames
     }

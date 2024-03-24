@@ -9,12 +9,14 @@ use std::{
 };
 use tokio::sync::RwLockWriteGuard;
 
+/// A thread-local handle to a logical page of data.
 pub struct PageHandle {
     pub(crate) page: Arc<Page>,
     pub(crate) uring: IoUringAsync,
 }
 
 impl PageHandle {
+    /// Gets a read guard on a logical page, which guarantees the data is in memory.
     pub(crate) async fn read(&self) -> ReadPageGuard {
         self.page.eviction_state.store(HOT, Ordering::Release);
 
@@ -34,6 +36,7 @@ impl PageHandle {
         ReadPageGuard::new(write_guard.downgrade())
     }
 
+    /// Gets a write guard on a logical page, which guarantees the data is in memory.
     pub(crate) async fn write(&self) -> WritePageGuard {
         self.page.eviction_state.store(HOT, Ordering::Release);
 
@@ -49,6 +52,7 @@ impl PageHandle {
         WritePageGuard::new(write_guard)
     }
 
+    /// Loads page data from disk into a frame in memory.
     async fn load(&self, guard: &mut RwLockWriteGuard<'_, Option<Frame>>) {
         if guard.deref().is_some() {
             // Someone else got in front of us and loaded the page for us

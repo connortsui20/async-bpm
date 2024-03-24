@@ -1,3 +1,5 @@
+//! Implementation of futures for `io_uring` operations.
+
 use io_uring::cqueue::Entry as CqEntry;
 use std::cell::RefCell;
 use std::collections::HashMap;
