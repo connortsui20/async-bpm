@@ -29,14 +29,19 @@ impl IoUringAsync {
 
         loop {
             let mut guard = async_fd.readable().await.unwrap();
-            guard.get_inner().handle_cqe();
+            guard.get_inner().poll();
             guard.clear_ready();
         }
     }
 
+    /// Submit all queued submission queue events to the kernel.
+    pub fn submit(&self) -> std::io::Result<usize> {
+        self.uring.submit()
+    }
+
     /// Pushes an entry onto the submission queue.
     ///
-    /// The caller must ensure that the entry has a unique ID as its user data,
+    /// The caller must ensure that the entry has a unique 64-bit integer ID as its user data,
     /// otherwise this function will panic.
     pub fn push(&self, entry: SqEntry) -> Op {
         let id = entry.get_user_data();
@@ -52,7 +57,8 @@ impl IoUringAsync {
         let index = guard.insert(id, Lifecycle::Unsubmitted);
 
         while unsafe { self.uring.submission_shared().push(&entry).is_err() } {
-            self.uring.submit().unwrap();
+            // Help make progress
+            self.submit().unwrap();
         }
 
         Op {
@@ -63,7 +69,7 @@ impl IoUringAsync {
         }
     }
 
-    pub fn handle_cqe(&self) {
+    pub fn poll(&self) {
         let mut guard = self.operations.borrow_mut();
 
         // Safety: The main reason this is safe is because `IoUringAsync` is thread local, and more
@@ -74,6 +80,7 @@ impl IoUringAsync {
         // `completion_shared()`.
         let completion_queue = unsafe { self.uring.completion_shared() };
 
+        // Pop off all of the completion queue data
         for cqe in completion_queue {
             let id = cqe.user_data();
 
@@ -101,11 +108,6 @@ impl IoUringAsync {
                 }
             }
         }
-    }
-
-    /// Submit all queued submission queue events to the kernel.
-    pub fn submit(&self) -> std::io::Result<usize> {
-        self.uring.submit()
     }
 }
 
