@@ -17,7 +17,7 @@ pub struct PageHandle {
 
 impl PageHandle {
     /// Gets a read guard on a logical page, which guarantees the data is in memory.
-    pub(crate) async fn read(&self) -> ReadPageGuard {
+    pub async fn read(&self) -> ReadPageGuard {
         self.page.eviction_state.store(HOT, Ordering::Release);
 
         let read_guard = self.page.inner.read().await;
@@ -37,7 +37,7 @@ impl PageHandle {
     }
 
     /// Gets a write guard on a logical page, which guarantees the data is in memory.
-    pub(crate) async fn write(&self) -> WritePageGuard {
+    pub async fn write(&self) -> WritePageGuard {
         self.page.eviction_state.store(HOT, Ordering::Release);
 
         let mut write_guard = self.page.inner.write().await;

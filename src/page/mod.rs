@@ -23,7 +23,7 @@ impl From<PageId> for u64 {
 
 type PageInner = Option<Frame>;
 
-pub(crate) struct Page {
+pub struct Page {
     pub(crate) pid: PageId,
     pub(crate) eviction_state: Temperature,
     pub(crate) inner: RwLock<PageInner>, // TODO change to hybrid latch
