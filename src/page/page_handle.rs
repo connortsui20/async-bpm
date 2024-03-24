@@ -1,5 +1,6 @@
 use super::eviction::HOT;
 use crate::frame::Frame;
+use crate::io::IoUringAsync;
 use crate::page::page_guard::{ReadPageGuard, WritePageGuard};
 use crate::page::Page;
 use std::{
@@ -10,7 +11,7 @@ use tokio::sync::RwLockWriteGuard;
 
 pub struct PageHandle {
     pub(crate) page: Arc<Page>,
-    // uring: Rc<IoUringAsync>,
+    pub(crate) uring: IoUringAsync,
 }
 
 impl PageHandle {

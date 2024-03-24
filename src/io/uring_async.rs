@@ -8,6 +8,8 @@ use std::{
 };
 use tokio::io::unix::AsyncFd;
 
+pub const IO_URING_DEFAULT_ENTRIES: u16 = 1 << 12; // 4096
+
 /// A thread-local `io_uring` instance
 #[derive(Clone)]
 pub struct IoUringAsync {
@@ -21,6 +23,15 @@ impl IoUringAsync {
         Ok(Self {
             uring: Rc::new(io_uring::IoUring::new(entries as u32)?),
             operations: Rc::new(RefCell::new(HashMap::with_capacity(entries as usize))),
+        })
+    }
+
+    pub fn try_default() -> std::io::Result<Self> {
+        Ok(Self {
+            uring: Rc::new(io_uring::IoUring::new(IO_URING_DEFAULT_ENTRIES as u32)?),
+            operations: Rc::new(RefCell::new(HashMap::with_capacity(
+                IO_URING_DEFAULT_ENTRIES as usize,
+            ))),
         })
     }
 
