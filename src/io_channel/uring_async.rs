@@ -12,21 +12,15 @@ use tokio::io::unix::AsyncFd;
 #[derive(Clone)]
 pub struct IoUringAsync {
     uring: Rc<IoUring>,
-    /// A table of unique operation IDs mapped to the current in-flight operation state.
+    /// A thread-local table of unique operation IDs mapped to current in-flight operation states.
     operations: Rc<RefCell<HashMap<u64, Lifecycle>>>,
-}
-
-impl AsRawFd for IoUringAsync {
-    fn as_raw_fd(&self) -> RawFd {
-        self.uring.as_raw_fd()
-    }
 }
 
 impl IoUringAsync {
     pub fn new(entries: u16) -> std::io::Result<Self> {
         Ok(Self {
             uring: Rc::new(io_uring::IoUring::new(entries as u32)?),
-            operations: Rc::new(RefCell::new(HashMap::with_capacity((entries * 2) as usize))),
+            operations: Rc::new(RefCell::new(HashMap::with_capacity(entries as usize))),
         })
     }
 
@@ -71,31 +65,52 @@ impl IoUringAsync {
 
     pub fn handle_cqe(&self) {
         let mut guard = self.operations.borrow_mut();
-        // while let Some(cqe) = unsafe { self.uring.completion_shared() }.next() {
-        //     let index = cqe.user_data();
-        //     let lifecycle = &mut guard[index.try_into().unwrap()];
-        //     match lifecycle {
-        //         Lifecycle::Unsubmitted => {
-        //             *lifecycle = Lifecycle::Completed(cqe);
-        //         }
-        //         Lifecycle::Waiting(waker) => {
-        //             waker.wake_by_ref();
-        //             *lifecycle = Lifecycle::Completed(cqe);
-        //         }
-        //         Lifecycle::Completed(cqe) => {
-        //             println!(
-        //                 "multishot operations not implemented: {}, {}",
-        //                 cqe.user_data(),
-        //                 cqe.result()
-        //             );
-        //         }
-        //     }
-        // }
-        todo!()
+
+        // Safety: The main reason this is safe is because `IoUringAsync` is thread local, and more
+        // specifically, is `!Send`.
+        // Since `IoUringAsync` is not `Send`, and since cloning an `IoUringAsync` does not actually
+        // clone the inner `IoUring` instance, only 1 `CompletionQueue` can exist in the context of
+        // this thread-local `IoUringAsync` instance, thus we satisfy the safety contract of
+        // `completion_shared()`.
+        let completion_queue = unsafe { self.uring.completion_shared() };
+
+        for cqe in completion_queue {
+            let id = cqe.user_data();
+
+            // This is safe to unwrap since we only remove the `Lifecycle` from the table after the
+            // owning `Op` gets dropped. Since `Op` is only dropped after it has polled/observed a
+            // `Lifecycle::Completed`, and we only set them to completed here, we can guarantee that
+            // the operation state is still mapped in the table.
+            let lifecycle = guard.get_mut(&id).unwrap();
+
+            // Set operation status to completed
+            match lifecycle {
+                Lifecycle::Unsubmitted => {
+                    *lifecycle = Lifecycle::Completed(cqe);
+                }
+                Lifecycle::Waiting(waker) => {
+                    waker.wake_by_ref();
+                    *lifecycle = Lifecycle::Completed(cqe);
+                }
+                Lifecycle::Completed(cqe) => {
+                    unimplemented!(
+                        "multi-shot operations not implemented yet: {}, {}",
+                        cqe.user_data(),
+                        cqe.result()
+                    );
+                }
+            }
+        }
     }
 
     /// Submit all queued submission queue events to the kernel.
     pub fn submit(&self) -> std::io::Result<usize> {
         self.uring.submit()
+    }
+}
+
+impl AsRawFd for IoUringAsync {
+    fn as_raw_fd(&self) -> RawFd {
+        self.uring.as_raw_fd()
     }
 }

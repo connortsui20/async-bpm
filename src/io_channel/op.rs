@@ -17,6 +17,7 @@ pub(super) enum Lifecycle {
 
 #[derive(Clone)]
 pub(super) struct OpInner {
+    /// A thread-local table of unique operation IDs mapped to current in-flight operation states.
     pub(super) operations: Rc<RefCell<HashMap<u64, Lifecycle>>>,
     /// A unique ID to an `io_uring` operation
     pub(super) id: u64,
