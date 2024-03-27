@@ -10,7 +10,7 @@ use tokio::sync::RwLock;
 /// A parallel Buffer Pool Manager that manages bringing logical pages from disk into memory via
 /// shared and fixed buffer frames.
 pub struct BufferPoolManager {
-    pub(crate) frames: Vec<Frame>, // TODO register frames via IoSlice
+    pub(crate) frames: Vec<Frame>,
     pub(crate) free_frames: ArrayQueue<Frame>,
     pub(crate) pages: RwLock<HashMap<PageId, Arc<Page>>>,
     num_frames: usize,
@@ -19,6 +19,7 @@ pub struct BufferPoolManager {
 impl BufferPoolManager {
     /// Constructs a new buffer pool manager.
     pub fn new(num_frames: usize) -> Self {
+         // TODO register frames via IoSlice
         Self {
             frames: (0..num_frames).map(|_| Frame::default()).collect(),
             free_frames: ArrayQueue::new(num_frames),
