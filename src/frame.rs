@@ -8,10 +8,9 @@ pub struct Frame {
 }
 
 impl Frame {
-    pub fn new(slice: &'static mut [u8]) -> Self {
-        let iovec = IoSlice::new(slice);
+    pub fn new(ioslice: IoSlice<'static>) -> Self {
         Self {
-            buf: iovec,
+            buf: ioslice,
             parent: None,
         }
     }
