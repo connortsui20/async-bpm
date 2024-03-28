@@ -36,7 +36,7 @@ impl IoUringAsync {
     }
 
     /// Continuously polls the completion queue and updates any local in-flight operation states.
-    pub async fn listen(&self) {
+    pub async fn listen(&self) -> ! {
         let async_fd = AsyncFd::new(self.clone()).unwrap();
 
         loop {
