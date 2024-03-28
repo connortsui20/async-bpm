@@ -2,7 +2,7 @@ use crate::{
     frame::Frame,
     io::IoUringAsync,
     page::{
-        eviction::{Temperature, COOL},
+        eviction::{Temperature, COLD},
         page_handle::PageHandle,
         Page, PageId, PageRef, PAGE_SIZE,
     },
@@ -96,7 +96,7 @@ impl BufferPoolManager {
 
         let new_page = Arc::new(Page {
             pid,
-            eviction_state: Temperature::new(COOL),
+            eviction_state: Temperature::new(COLD),
             inner: RwLock::new(None),
             bpm: self.clone(),
         });
