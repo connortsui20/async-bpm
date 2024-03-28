@@ -22,6 +22,8 @@ pub struct BufferPoolManager {
     buffers_ptr: *const IoSlice<'static>,
 }
 
+// unsafe impl Send for BufferPoolManager;
+
 impl BufferPoolManager {
     /// Constructs a new buffer pool manager.
     pub fn new(num_frames: usize) -> Self {
@@ -30,29 +32,40 @@ impl BufferPoolManager {
 
         // Allocate all of the memory up front and leak
         let bytes: &'static mut [u8] = vec![0u8; num_frames * PAGE_SIZE].leak();
+        println!(
+            "Size of leaked buffers: {:#010X}",
+            std::mem::size_of_val(bytes)
+        );
         debug_assert_eq!(bytes.len(), num_frames * PAGE_SIZE);
 
         // Note: use `as_chunks_unchecked_mut()` when it is stabilized
         // https://doc.rust-lang.org/std/primitive.slice.html#method.as_chunks_unchecked_mut
-        let buffers: Vec<&'static mut [u8]> = bytes.chunks_exact_mut(PAGE_SIZE).collect();
-        debug_assert_eq!(buffers.len(), num_frames);
+        let slices: Vec<&'static mut [u8]> = bytes.chunks_exact_mut(PAGE_SIZE).collect();
+        debug_assert_eq!(slices.len(), num_frames);
 
-        let slices: Vec<IoSlice<'static>> =
-            buffers.into_iter().map(|buf| IoSlice::new(buf)).collect();
+        let buffers: Vec<IoSlice<'static>> =
+            slices.into_iter().map(|buf| IoSlice::new(buf)).collect();
 
-        for buf in slices.iter().copied() {
+        for buf in buffers.iter().copied() {
             let frame = Frame::new(buf);
             free_frames
                 .push(frame)
                 .expect("Was not able to add the frame to the free_frames list");
         }
 
+        let leaked: &'static [IoSlice] = buffers.leak();
+        println!(
+            "Size of leaked vector of vectors: {:#010X}",
+            std::mem::size_of_val(leaked)
+        );
+        let buffers_ptr = leaked.as_ptr();
+
         Self {
+            num_frames,
             active_pages: Mutex::new(Vec::with_capacity(num_frames)),
             free_frames,
             pages: RwLock::new(HashMap::with_capacity(num_frames)),
-            buffers_ptr: slices.as_ptr(),
-            num_frames,
+            buffers_ptr,
         }
     }
 
@@ -106,9 +119,10 @@ impl BufferPoolManager {
 
 #[tokio::test]
 async fn test_new_bpm() {
-    let bpm = Arc::new(BufferPoolManager::new(10));
+    let num_frames = 1 << 22;
+    let bpm = Arc::new(BufferPoolManager::new(num_frames));
 
-    assert_eq!(bpm.num_frames(), 10);
+    assert_eq!(bpm.num_frames(), num_frames);
 
     let id1 = PageId::new(0);
     let id2 = PageId::new(42);
