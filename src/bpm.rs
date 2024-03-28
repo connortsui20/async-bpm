@@ -8,18 +8,20 @@ use crate::{
     },
 };
 use crossbeam_queue::ArrayQueue;
+use send_wrapper::SendWrapper;
 use std::{collections::HashMap, io::IoSlice, sync::Arc};
+use thread_local::ThreadLocal;
 use tokio::sync::{Mutex, RwLock};
 
 /// A parallel Buffer Pool Manager that manages bringing logical pages from disk into memory via
 /// shared and fixed buffer frames.
-#[derive(Debug)]
 pub struct BufferPoolManager {
     num_frames: usize,
     pub(crate) active_pages: Mutex<Vec<PageRef>>,
     pub(crate) free_frames: ArrayQueue<Frame>,
     pub(crate) pages: RwLock<HashMap<PageId, PageRef>>,
     io_slices: &'static [IoSlice<'static>],
+    io_urings: ThreadLocal<SendWrapper<IoUringAsync>>,
 }
 
 impl BufferPoolManager {
@@ -46,9 +48,10 @@ impl BufferPoolManager {
 
         for buf in buffers.iter().copied() {
             let frame = Frame::new(buf);
-            free_frames
-                .push(frame)
-                .expect("Was not able to add the frame to the free_frames list");
+            let res = free_frames.push(frame);
+            if res.is_err() {
+                panic!("Was not able to add the frame to the free_frames list");
+            }
         }
 
         let io_slices: &'static [IoSlice] = buffers.leak();
@@ -63,6 +66,7 @@ impl BufferPoolManager {
             free_frames,
             pages: RwLock::new(HashMap::with_capacity(num_frames)),
             io_slices,
+            io_urings: ThreadLocal::with_capacity(num_frames),
         }
     }
 

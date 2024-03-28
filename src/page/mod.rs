@@ -9,7 +9,6 @@ use tokio::sync::RwLock;
 
 pub const PAGE_SIZE: usize = 1 << 12;
 
-#[derive(Debug)]
 pub struct Page {
     pub(crate) pid: PageId,
     pub(crate) eviction_state: Temperature,

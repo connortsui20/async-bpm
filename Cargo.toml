@@ -8,4 +8,6 @@ edition = "2021"
 [dependencies]
 crossbeam-queue = "0.3.11"
 io-uring = "0.6.3"
+send_wrapper = "0.6.0"
+thread_local = "1.1.8"
 tokio = { version = "1.36.0", features = ["sync", "rt", "net", "macros"] }

@@ -1,7 +1,6 @@
 use crate::page::PageRef;
 use std::io::IoSlice;
 
-#[derive(Debug)]
 pub struct Frame {
     pub(crate) buf: IoSlice<'static>,
     pub(crate) parent: Option<PageRef>,
