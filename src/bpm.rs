@@ -11,6 +11,16 @@ use crossbeam_queue::ArrayQueue;
 use std::{collections::HashMap, io::IoSlice, sync::Arc};
 use tokio::sync::{Mutex, RwLock};
 
+/// Safety: The only thing that is `!Send` in `BufferPoolManager` is the `buffers_ptr` field, and
+/// since it is created from a leaked `'static` valid `Vec`, we know it is valid and can be safely
+/// sent between threads.
+unsafe impl Send for BufferPoolManager {}
+
+/// Safety: The only thing that is `!Sync` in `BufferPoolManager` is the `buffers_ptr` field, and
+/// since it is created from a leaked `'static` valid `Vec`, we know it is valid and can be safely
+/// sent between threads.
+unsafe impl Sync for BufferPoolManager {}
+
 /// A parallel Buffer Pool Manager that manages bringing logical pages from disk into memory via
 /// shared and fixed buffer frames.
 #[derive(Debug)]
@@ -21,8 +31,6 @@ pub struct BufferPoolManager {
     pub(crate) pages: RwLock<HashMap<PageId, PageRef>>,
     buffers_ptr: *const IoSlice<'static>,
 }
-
-// unsafe impl Send for BufferPoolManager;
 
 impl BufferPoolManager {
     /// Constructs a new buffer pool manager.
