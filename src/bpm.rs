@@ -11,16 +11,6 @@ use crossbeam_queue::ArrayQueue;
 use std::{collections::HashMap, io::IoSlice, sync::Arc};
 use tokio::sync::{Mutex, RwLock};
 
-/// Safety: The only thing that is `!Send` in `BufferPoolManager` is the `buffers_ptr` field, and
-/// since it is created from a leaked `'static` valid `Vec`, we know it is valid and can be safely
-/// sent between threads.
-unsafe impl Send for BufferPoolManager {}
-
-/// Safety: The only thing that is `!Sync` in `BufferPoolManager` is the `buffers_ptr` field, and
-/// since it is created from a leaked `'static` valid `Vec`, we know it is valid and can be safely
-/// sent between threads.
-unsafe impl Sync for BufferPoolManager {}
-
 /// A parallel Buffer Pool Manager that manages bringing logical pages from disk into memory via
 /// shared and fixed buffer frames.
 #[derive(Debug)]
@@ -29,7 +19,7 @@ pub struct BufferPoolManager {
     pub(crate) active_pages: Mutex<Vec<PageRef>>,
     pub(crate) free_frames: ArrayQueue<Frame>,
     pub(crate) pages: RwLock<HashMap<PageId, PageRef>>,
-    buffers_ptr: *const IoSlice<'static>,
+    io_slices: &'static [IoSlice<'static>],
 }
 
 impl BufferPoolManager {
@@ -61,19 +51,18 @@ impl BufferPoolManager {
                 .expect("Was not able to add the frame to the free_frames list");
         }
 
-        let leaked: &'static [IoSlice] = buffers.leak();
+        let io_slices: &'static [IoSlice] = buffers.leak();
         println!(
-            "Size of leaked vector of vectors: {:#010X}",
-            std::mem::size_of_val(leaked)
+            "Size of leaked vector of IoSlice: {:#010X}",
+            std::mem::size_of_val(io_slices)
         );
-        let buffers_ptr = leaked.as_ptr();
 
         Self {
             num_frames,
             active_pages: Mutex::new(Vec::with_capacity(num_frames)),
             free_frames,
             pages: RwLock::new(HashMap::with_capacity(num_frames)),
-            buffers_ptr,
+            io_slices,
         }
     }
 
