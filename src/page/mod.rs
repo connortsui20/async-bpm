@@ -24,6 +24,12 @@ pub struct PageId {
     inner: u64,
 }
 
+impl PageId {
+    pub fn new(id: u64) -> Self {
+        Self { inner: id }
+    }
+}
+
 /// We must always be able to convert a `PageId` into a unique 64-bit integer.
 impl From<PageId> for u64 {
     fn from(value: PageId) -> Self {

@@ -8,4 +8,4 @@ edition = "2021"
 [dependencies]
 crossbeam-queue = "0.3.11"
 io-uring = "0.6.3"
-tokio = { version = "1.36.0", features = ["sync", "rt", "net"] }
+tokio = { version = "1.36.0", features = ["sync", "rt", "net", "macros"] }
