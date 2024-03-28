@@ -15,12 +15,4 @@ impl Frame {
             parent: None,
         }
     }
-
-    pub fn take_parent(&mut self) -> Option<Arc<Page>> {
-        todo!()
-    }
-
-    pub fn replace_parent(&mut self, new_parent: Arc<Page>) -> Option<Arc<Page>> {
-        todo!()
-    }
 }
