@@ -1,17 +1,14 @@
 use super::eviction::HOT;
+use super::PageRef;
 use crate::frame::Frame;
 use crate::io::IoUringAsync;
 use crate::page::page_guard::{ReadPageGuard, WritePageGuard};
-use crate::page::Page;
-use std::{
-    ops::Deref,
-    sync::{atomic::Ordering, Arc},
-};
+use std::{ops::Deref, sync::atomic::Ordering};
 use tokio::sync::RwLockWriteGuard;
 
 /// A thread-local handle to a logical page of data.
 pub struct PageHandle {
-    pub(crate) page: Arc<Page>,
+    pub(crate) page: PageRef,
     pub(crate) uring: IoUringAsync,
 }
 

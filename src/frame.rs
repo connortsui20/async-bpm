@@ -1,10 +1,10 @@
-use crate::page::Page;
+use crate::page::PageRef;
 use std::io::IoSlice;
-use std::sync::Arc;
 
+#[derive(Debug)]
 pub struct Frame {
     pub(crate) buf: IoSlice<'static>,
-    pub(crate) parent: Option<Arc<Page>>,
+    pub(crate) parent: Option<PageRef>,
 }
 
 impl Frame {
