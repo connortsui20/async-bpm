@@ -9,7 +9,7 @@ use crate::{
 };
 use crossbeam_queue::ArrayQueue;
 use send_wrapper::SendWrapper;
-use std::{collections::HashMap, io::IoSlice, sync::Arc};
+use std::{collections::HashMap, io::IoSlice, ops::Deref, sync::Arc};
 use thread_local::ThreadLocal;
 use tokio::sync::{Mutex, RwLock};
 
@@ -105,14 +105,23 @@ impl BufferPoolManager {
     /// Constructs a thread-local handle to a logical page, as long as the page already exists.
     /// If it does not exist in the context of the buffer pool manager, returns `None`.
     ///
+    /// TODO figure out how to properly handle `IoUringAsync` creation failure
+    ///
     /// If the page does not already exist, use `create_page` instead to get a `PageHandle`.
     pub async fn get_page(self: &Arc<Self>, pid: PageId) -> Option<PageHandle> {
         let pages_guard = self.pages.read().await;
 
         let page = pages_guard.get(&pid)?.clone();
 
-        // TODO make this thread local with registered buffers
-        let uring = IoUringAsync::try_default().ok()?;
+        let uring = self
+            .io_urings
+            .get_or(|| {
+                SendWrapper::new(
+                    IoUringAsync::try_default().expect("Unable to create an `IoUring` instance"),
+                )
+            })
+            .deref()
+            .clone();
 
         Some(PageHandle { page, uring })
     }
