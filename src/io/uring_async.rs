@@ -44,12 +44,32 @@ impl IoUringAsync {
     ///
     /// This `Future` _must_ be placed onto the task queue of a thread _at least_ once, otherwise no
     /// `Op` futures will ever make progress.
-    pub async fn listen(&self) -> ! {
+    pub async fn listener(&self) -> ! {
         let async_fd = AsyncFd::new(self.clone()).unwrap();
 
         loop {
             let mut guard = async_fd.readable().await.unwrap();
             guard.get_inner().poll();
+            guard.clear_ready();
+        }
+    }
+
+    /// Continuously submits entries on the submission queue.
+    ///
+    /// Will panic if submission fails.
+    ///
+    /// Either this `Future` _must_ be placed onto the task queue of a thread _at least_ once, or
+    /// the caller must ensure that they manually call [`IoUringAsync::submit`] at regular intervals
+    /// otherwise no `Op` futures will ever make progress.
+    pub async fn submitter(&self) -> ! {
+        let async_fd = AsyncFd::new(self.clone()).unwrap();
+
+        loop {
+            let mut guard = async_fd.readable().await.unwrap();
+            guard.get_inner().submit().expect(
+                "Something went wrong when trying to submit \
+                `io_uring` operation events on the submission queue",
+            );
             guard.clear_ready();
         }
     }
@@ -63,7 +83,16 @@ impl IoUringAsync {
     ///
     /// The caller must ensure that the entry has a unique 64-bit integer ID as its user data,
     /// otherwise this function will panic.
-    pub fn push(&self, entry: SqEntry) -> Op {
+    ///
+    /// # Safety
+    ///
+    /// Developers must ensure that parameters of the entry (such as a registered buffer) are valid
+    /// and will be valid for the entire duration of the operation, otherwise it will cause
+    /// undefined behavior
+    ///
+    /// This safety contract is almost identical to the contract for
+    /// [`SubmissionQueue::push`](io_uring::SubmissionQueue::push).
+    pub unsafe fn push(&self, entry: SqEntry) -> Op {
         let id = entry.get_user_data();
 
         let mut operations_guard = self.operations.borrow_mut();
@@ -80,9 +109,7 @@ impl IoUringAsync {
         let mut submission_queue = uring_guard.submission();
 
         // Safety: We must ensure that the parameters of this entry are valid for the entire
-        // duration of the operation.
-        // Since the buffers we read and write from have `'static` lifetimes, this will not cause
-        // any memory problems.
+        // duration of the operation, and this is guaranteed by this function's safety contract.
         while unsafe { submission_queue.push(&entry).is_err() } {
             // Help make progress
             self.submit().unwrap();
