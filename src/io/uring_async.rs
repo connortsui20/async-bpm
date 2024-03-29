@@ -10,10 +10,13 @@ use tokio::io::unix::AsyncFd;
 
 pub const IO_URING_DEFAULT_ENTRIES: u16 = 1 << 12; // 4096
 
-/// A thread-local `io_uring` instance
+/// A thread-local `io_uring` instance that can be embedded in an asynchronous runtime.
+///
+/// Implicitly, it must be thread-local since it is `!Send`.
 #[derive(Clone)]
 pub struct IoUringAsync {
-    uring: Rc<IoUring>,
+    /// The thread-local `io_uring` instance.
+    uring: Rc<RefCell<IoUring>>,
     /// A thread-local table of unique operation IDs mapped to current in-flight operation states.
     operations: Rc<RefCell<HashMap<u64, Lifecycle>>>,
 }
@@ -21,14 +24,16 @@ pub struct IoUringAsync {
 impl IoUringAsync {
     pub fn new(entries: u16) -> std::io::Result<Self> {
         Ok(Self {
-            uring: Rc::new(io_uring::IoUring::new(entries as u32)?),
+            uring: Rc::new(RefCell::new(io_uring::IoUring::new(entries as u32)?)),
             operations: Rc::new(RefCell::new(HashMap::with_capacity(entries as usize))),
         })
     }
 
     pub fn try_default() -> std::io::Result<Self> {
         Ok(Self {
-            uring: Rc::new(io_uring::IoUring::new(IO_URING_DEFAULT_ENTRIES as u32)?),
+            uring: Rc::new(RefCell::new(io_uring::IoUring::new(
+                IO_URING_DEFAULT_ENTRIES as u32,
+            )?)),
             operations: Rc::new(RefCell::new(HashMap::with_capacity(
                 IO_URING_DEFAULT_ENTRIES as usize,
             ))),
@@ -36,6 +41,9 @@ impl IoUringAsync {
     }
 
     /// Continuously polls the completion queue and updates any local in-flight operation states.
+    ///
+    /// This `Future` _must_ be placed onto the task queue of a thread _at least_ once, otherwise no
+    /// `Op` futures will ever make progress.
     pub async fn listen(&self) -> ! {
         let async_fd = AsyncFd::new(self.clone()).unwrap();
 
@@ -48,7 +56,7 @@ impl IoUringAsync {
 
     /// Submit all queued submission queue events to the kernel.
     pub fn submit(&self) -> std::io::Result<usize> {
-        self.uring.submit()
+        self.uring.borrow().submit()
     }
 
     /// Pushes an entry onto the submission queue.
@@ -58,17 +66,24 @@ impl IoUringAsync {
     pub fn push(&self, entry: SqEntry) -> Op {
         let id = entry.get_user_data();
 
-        let mut guard = self.operations.borrow_mut();
+        let mut operations_guard = self.operations.borrow_mut();
 
+        let index = operations_guard.insert(id, Lifecycle::Unsubmitted);
         assert!(
-            !guard.contains_key(&id),
-            "Tried to create an `io_uring` operation that has the same ID as a \
-            currently in-flight operation"
+            index.is_none(),
+            "Tried to start an IO event with id {id} that was already in progress, \
+            with current state {:?}",
+            index.unwrap()
         );
 
-        let index = guard.insert(id, Lifecycle::Unsubmitted);
+        let mut uring_guard = self.uring.borrow_mut();
+        let mut submission_queue = uring_guard.submission();
 
-        while unsafe { self.uring.submission_shared().push(&entry).is_err() } {
+        // Safety: We must ensure that the parameters of this entry are valid for the entire
+        // duration of the operation.
+        // Since the buffers we read and write from have `'static` lifetimes, this will not cause
+        // any memory problems.
+        while unsafe { submission_queue.push(&entry).is_err() } {
             // Help make progress
             self.submit().unwrap();
         }
@@ -82,17 +97,12 @@ impl IoUringAsync {
     }
 
     pub fn poll(&self) {
+        let mut uring_guard = self.uring.borrow_mut();
+        let completion_queue = uring_guard.completion();
+
         let mut guard = self.operations.borrow_mut();
 
-        // Safety: The main reason this is safe is because `IoUringAsync` is thread local, and more
-        // specifically, is `!Send`.
-        // Since `IoUringAsync` is not `Send`, and since cloning an `IoUringAsync` does not actually
-        // clone the inner `IoUring` instance, only 1 `CompletionQueue` can exist in the context of
-        // this thread-local `IoUringAsync` instance, thus we satisfy the safety contract of
-        // `completion_shared()`.
-        let completion_queue = unsafe { self.uring.completion_shared() };
-
-        // Pop off all of the completion queue data
+        // Iterate through all of the completed operations
         for cqe in completion_queue {
             let id = cqe.user_data();
 
@@ -125,6 +135,6 @@ impl IoUringAsync {
 
 impl AsRawFd for IoUringAsync {
     fn as_raw_fd(&self) -> RawFd {
-        self.uring.as_raw_fd()
+        self.uring.borrow().as_raw_fd()
     }
 }
