@@ -6,7 +6,7 @@ use tokio::task::LocalSet;
 
 #[tokio::test]
 async fn test_new_bpm() {
-    let num_frames = 1 << 22;
+    let num_frames = 1 << 15;
     let bpm = Arc::new(BufferPoolManager::new(num_frames));
 
     assert_eq!(bpm.num_frames(), num_frames);
@@ -14,6 +14,7 @@ async fn test_new_bpm() {
     let id1 = PageId::new(0);
     let id2 = PageId::new(42);
 
+    // TODO add tasks that continuously poll and submit
     assert!(bpm.get_page(id1).await.is_none());
     let _page_handle1 = bpm.create_page(id1).await;
     assert!(bpm.get_page(id1).await.is_some());
@@ -27,7 +28,7 @@ async fn test_new_bpm() {
 fn test_new_bpm_with_threads() {
     use tokio::runtime::Builder;
 
-    let num_frames = 1 << 22;
+    let num_frames = 1 << 15;
     let bpm = Arc::new(BufferPoolManager::new(num_frames));
 
     assert_eq!(bpm.num_frames(), num_frames);
@@ -36,12 +37,12 @@ fn test_new_bpm_with_threads() {
     let id2 = PageId::new(42);
 
     // Create the runtime
-    // let rt = Runtime::new().unwrap();
     let rt = Builder::new_current_thread().enable_all().build().unwrap();
     let rt = Arc::new(rt);
 
     let barrier = Arc::new(Barrier::new(2));
 
+    // TODO add tasks that continuously poll and submit
     thread::scope(|s| {
         let bpm1 = bpm.clone();
         let bpm2 = bpm.clone();

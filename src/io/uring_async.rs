@@ -3,6 +3,7 @@ use io_uring::{squeue::Entry as SqEntry, IoUring};
 use std::{
     cell::RefCell,
     collections::HashMap,
+    io,
     os::fd::{AsRawFd, RawFd},
     rc::Rc,
 };
@@ -22,14 +23,14 @@ pub struct IoUringAsync {
 }
 
 impl IoUringAsync {
-    pub fn new(entries: u16) -> std::io::Result<Self> {
+    pub fn new(entries: u16) -> io::Result<Self> {
         Ok(Self {
             uring: Rc::new(RefCell::new(io_uring::IoUring::new(entries as u32)?)),
             operations: Rc::new(RefCell::new(HashMap::with_capacity(entries as usize))),
         })
     }
 
-    pub fn try_default() -> std::io::Result<Self> {
+    pub fn try_default() -> io::Result<Self> {
         Ok(Self {
             uring: Rc::new(RefCell::new(io_uring::IoUring::new(
                 IO_URING_DEFAULT_ENTRIES as u32,
