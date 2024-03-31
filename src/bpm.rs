@@ -8,6 +8,7 @@ use crate::{
     },
 };
 use crossbeam_queue::ArrayQueue;
+use io_uring::{cqueue::Entry as CqEntry, opcode::ProvideBuffers, squeue::Entry as SqEntry};
 use send_wrapper::SendWrapper;
 use std::{collections::HashMap, io::IoSlice, ops::Deref, sync::Arc};
 use thread_local::ThreadLocal;
@@ -75,31 +76,85 @@ impl BufferPoolManager {
         self.num_frames
     }
 
+    // TODO docs
+    async fn get_thread_local_uring(&self) -> IoUringAsync {
+        match self.io_urings.get() {
+            Some(uring) => uring.deref().clone(),
+            None => {
+                let mut uring =
+                    IoUringAsync::try_default().expect("Unable to create an `IoUring` instance");
+
+                self.register_buffers(&mut uring).await;
+
+                self.io_urings
+                    .get_or(|| SendWrapper::new(uring))
+                    .deref()
+                    .clone()
+            }
+        }
+    }
+
+    // TODO docs
+    async fn register_buffers(&self, uring: &mut IoUringAsync) {
+        let ptr = self.io_slices.as_ptr();
+        let addr = ptr as *mut u8;
+
+        let buffer_len: i32 = PAGE_SIZE
+            .try_into()
+            .expect("PAGE_SIZE should fit into a 32-bit integer");
+
+        // TODO can only register 2^16 bytes of buffers at a time, need to expand
+        let num_buffers: u16 = self
+            .io_slices
+            .len()
+            .try_into()
+            .expect("The number of registered buffers should fit into a 16-bit integer");
+
+        // TODO figure out buffer groups
+        let provide = ProvideBuffers::new(addr, buffer_len, num_buffers, 0, 0);
+
+        // TODO reserve some u64 numbers for registering buffers
+        let entry_id = 0;
+        let entry: SqEntry = provide.build().user_data(entry_id);
+
+        println!("Attempting to register buffers");
+
+        // Safety: Since we have a valid reference to the buffers that this entry points to, and
+        // since we wait for the completion of this event while we hold the reference, the buffers
+        // must be valid for the entire duration of the operation.
+        let cqe: CqEntry = unsafe { uring.push(entry) }.await;
+
+        println!("Finished registering buffers");
+
+        assert!(cqe.user_data() == entry_id);
+        assert!(
+            cqe.result() >= 0,
+            "Registering buffers into an `io_uring` instance failed"
+        );
+    }
+
     /// Creates a logical page in the buffer pool manager, returning `PageHandle` to the page.
     ///
     /// If the page already exists, returns `None`.
     pub async fn create_page(self: &Arc<Self>, pid: PageId) -> Option<PageHandle> {
-        let uring = IoUringAsync::try_default().ok()?;
-
         let mut pages_guard = self.pages.write().await;
 
         if pages_guard.contains_key(&pid) {
             return None;
         }
 
-        let new_page = Arc::new(Page {
+        let page = Arc::new(Page {
             pid,
             eviction_state: Temperature::new(TemperatureState::Cold),
             inner: RwLock::new(None),
             bpm: self.clone(),
         });
 
-        pages_guard.insert(pid, new_page.clone());
+        pages_guard.insert(pid, page.clone());
 
-        Some(PageHandle {
-            page: new_page,
-            uring,
-        })
+        let uring = self.get_thread_local_uring().await;
+
+        Some(PageHandle { page, uring })
     }
 
     /// Constructs a thread-local handle to a logical page, as long as the page already exists.
@@ -113,15 +168,7 @@ impl BufferPoolManager {
 
         let page = pages_guard.get(&pid)?.clone();
 
-        let uring = self
-            .io_urings
-            .get_or(|| {
-                SendWrapper::new(
-                    IoUringAsync::try_default().expect("Unable to create an `IoUring` instance"),
-                )
-            })
-            .deref()
-            .clone();
+        let uring = self.get_thread_local_uring().await;
 
         Some(PageHandle { page, uring })
     }
