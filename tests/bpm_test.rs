@@ -1,7 +1,9 @@
 use async_bpm::io::IoUringAsync;
 use async_bpm::{bpm::BufferPoolManager, page::PageId};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::thread;
+use tokio::io::unix::AsyncFd;
 use tokio::runtime::Builder;
 use tokio::sync::Barrier;
 use tokio::task::{self, spawn_local, LocalSet};
@@ -54,18 +56,23 @@ fn test_bpm_register() {
 
         local
             .run_until(async {
+                let async_fd = Rc::new(AsyncFd::new(uring).unwrap());
+
                 println!("Spawning listener");
-                task::spawn_local(IoUringAsync::listener(uring_listener));
+                task::spawn_local(IoUringAsync::listener(uring_listener, async_fd.clone()));
                 println!("Spawning submitter");
-                task::spawn_local(IoUringAsync::submitter(uring_submitter));
+                task::spawn_local(IoUringAsync::submitter(uring_submitter, async_fd.clone()));
 
                 println!("Beginning Test");
 
                 assert!(bpm.get_page(id1).await.is_none());
                 let _page_handle1 = bpm.create_page(id1).await;
-                assert!(bpm.get_page(id1).await.is_some());
 
-                for _ in 0..10000 {
+                for i in 0..10000 {
+                    if i % 100 == 0 {
+                        dbg!(i);
+                    }
+
                     assert!(bpm.get_page(id1).await.is_some());
                 }
 

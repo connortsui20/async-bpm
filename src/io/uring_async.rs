@@ -5,7 +5,7 @@ use std::{
     collections::HashMap,
     io,
     os::fd::{AsRawFd, RawFd},
-    rc::Rc,
+    rc::Rc, sync::Arc,
 };
 use tokio::io::unix::AsyncFd;
 
@@ -47,11 +47,9 @@ impl IoUringAsync {
     /// `Op` futures will ever make progress.
     ///
     /// TODO figure out if this is what we actually want
-    pub async fn listener(uring: Self) -> ! {
-        let async_fd = AsyncFd::new(uring).unwrap();
-
+    pub async fn listener(uring: Self, async_fd: Rc<AsyncFd<IoUringAsync>>) -> ! {
         loop {
-            let mut guard = async_fd.readable().await.unwrap();
+            let mut guard = async_fd.writable().await.unwrap();
             println!("Listening");
             guard.get_inner().poll();
             guard.clear_ready();
@@ -67,9 +65,7 @@ impl IoUringAsync {
     /// otherwise no `Op` futures will ever make progress.
     ///
     /// TODO figure out if this is what we actually want
-    pub async fn submitter(uring: Self) -> ! {
-        let async_fd = AsyncFd::new(uring).unwrap();
-
+    pub async fn submitter(uring: Self, async_fd: Rc<AsyncFd<IoUringAsync>>) -> ! {
         loop {
             let mut guard = async_fd.writable().await.unwrap();
             println!("Submitting");
