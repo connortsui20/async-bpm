@@ -47,8 +47,8 @@ impl IoUringAsync {
     /// `Op` futures will ever make progress.
     ///
     /// TODO figure out if this is what we actually want
-    pub async fn listener(&self) -> ! {
-        let async_fd = AsyncFd::new(self.clone()).unwrap();
+    pub async fn listener(uring: Self) {
+        let async_fd = AsyncFd::new(uring).unwrap();
 
         loop {
             println!("Listening");
