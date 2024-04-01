@@ -47,12 +47,12 @@ impl IoUringAsync {
     /// `Op` futures will ever make progress.
     ///
     /// TODO figure out if this is what we actually want
-    pub async fn listener(uring: Self) {
+    pub async fn listener(uring: Self) -> ! {
         let async_fd = AsyncFd::new(uring).unwrap();
 
         loop {
-            println!("Listening");
             let mut guard = async_fd.readable().await.unwrap();
+            println!("Listening");
             guard.get_inner().poll();
             guard.clear_ready();
         }
@@ -67,12 +67,12 @@ impl IoUringAsync {
     /// otherwise no `Op` futures will ever make progress.
     ///
     /// TODO figure out if this is what we actually want
-    pub async fn submitter(&self) -> ! {
-        let async_fd = AsyncFd::new(self.clone()).unwrap();
+    pub async fn submitter(uring: Self) -> ! {
+        let async_fd = AsyncFd::new(uring).unwrap();
 
         loop {
-            println!("Submitting");
             let mut guard = async_fd.writable().await.unwrap();
+            println!("Submitting");
             guard.get_inner().submit().expect(
                 "Something went wrong when trying to submit \
                 `io_uring` operation events on the submission queue",
