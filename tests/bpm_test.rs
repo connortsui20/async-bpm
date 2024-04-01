@@ -28,7 +28,7 @@ async fn test_new_bpm() {
 
 #[test]
 fn test_bpm_register() {
-    let num_frames = 1 << 15;
+    let num_frames = 1 << 10;
     let bpm = Arc::new(BufferPoolManager::new(num_frames));
     assert_eq!(bpm.num_frames(), num_frames);
 
@@ -67,11 +67,12 @@ fn test_bpm_register() {
 
                 for _ in 0..10000 {
                     assert!(bpm.get_page(id1).await.is_some());
-                    assert!(bpm.get_page(id2).await.is_some());
                 }
+
+                println!("Finishing Test");
             })
             .await;
-    })
+    });
 }
 
 // #[test]

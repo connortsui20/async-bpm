@@ -56,6 +56,7 @@ impl BufferPoolManager {
         }
 
         let io_slices: &'static [IoSlice] = buffers.leak();
+        assert_eq!(io_slices.len(), num_frames);
         println!(
             "Size of leaked vector of IoSlice: {:#010X}",
             std::mem::size_of_val(io_slices)
@@ -96,13 +97,12 @@ impl BufferPoolManager {
 
     // TODO docs
     fn register_buffers(&self, uring: &mut IoUringAsync) {
-        println!("Safe buffers: {:?}", self.io_slices);
         let ptr = self.io_slices.as_ptr() as *const iovec;
 
         // TODO safety
         let raw_buffers: &'static [iovec] =
             unsafe { std::slice::from_raw_parts(ptr, self.io_slices.len()) };
-        println!("Unsafe buffers: {:?}", raw_buffers);
+        assert_eq!(raw_buffers.len(), self.num_frames());
 
         let raw_uring = uring.uring.borrow_mut();
 
