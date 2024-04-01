@@ -17,7 +17,7 @@ pub const IO_URING_DEFAULT_ENTRIES: u16 = 1 << 12; // 4096
 #[derive(Clone)]
 pub struct IoUringAsync {
     /// The thread-local `io_uring` instance.
-    uring: Rc<RefCell<IoUring>>,
+    pub(crate) uring: Rc<RefCell<IoUring>>,
     /// A thread-local table of unique operation IDs mapped to current in-flight operation states.
     operations: Rc<RefCell<HashMap<u64, Lifecycle>>>,
 }

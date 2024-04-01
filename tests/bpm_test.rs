@@ -48,11 +48,28 @@ fn test_bpm_register() {
     let local = LocalSet::new();
 
     rt.block_on(async move {
-        let uring = bpm.get_thread_local_uring().await;
+        let uring = bpm.get_thread_local_uring();
         let uring_listener = uring.clone();
+        let uring_submitter = uring.clone();
 
         local
-            .run_until(async { task::spawn_local(IoUringAsync::listener(uring_listener)) })
+            .run_until(async {
+                println!("Spawning listener");
+                task::spawn_local(IoUringAsync::listener(uring_listener));
+                println!("Spawning submitter");
+                task::spawn_local(IoUringAsync::submitter(uring_submitter));
+
+                println!("Beginning Test");
+
+                assert!(bpm.get_page(id1).await.is_none());
+                let _page_handle1 = bpm.create_page(id1).await;
+                assert!(bpm.get_page(id1).await.is_some());
+
+                for _ in 0..10000 {
+                    assert!(bpm.get_page(id1).await.is_some());
+                    assert!(bpm.get_page(id2).await.is_some());
+                }
+            })
             .await;
     })
 }
