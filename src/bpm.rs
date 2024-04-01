@@ -77,7 +77,7 @@ impl BufferPoolManager {
     }
 
     // TODO docs
-    async fn get_thread_local_uring(&self) -> IoUringAsync {
+    pub async fn get_thread_local_uring(&self) -> IoUringAsync {
         match self.io_urings.get() {
             Some(uring) => uring.deref().clone(),
             None => {
@@ -95,6 +95,7 @@ impl BufferPoolManager {
     }
 
     // TODO docs
+    // TODO make not async
     async fn register_buffers(&self, uring: &mut IoUringAsync) {
         let ptr = self.io_slices.as_ptr();
         let addr = ptr as *mut u8;

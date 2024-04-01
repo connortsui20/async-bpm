@@ -51,6 +51,7 @@ impl IoUringAsync {
         let async_fd = AsyncFd::new(self.clone()).unwrap();
 
         loop {
+            println!("Listening");
             let mut guard = async_fd.readable().await.unwrap();
             guard.get_inner().poll();
             guard.clear_ready();
@@ -70,7 +71,8 @@ impl IoUringAsync {
         let async_fd = AsyncFd::new(self.clone()).unwrap();
 
         loop {
-            let mut guard = async_fd.readable().await.unwrap();
+            println!("Submitting");
+            let mut guard = async_fd.writable().await.unwrap();
             guard.get_inner().submit().expect(
                 "Something went wrong when trying to submit \
                 `io_uring` operation events on the submission queue",
