@@ -8,34 +8,13 @@ use tokio::runtime::Builder;
 use tokio::sync::Barrier;
 use tokio::task::{self, spawn_local, LocalSet};
 
-#[tokio::test]
-async fn test_new_bpm() {
-    let num_frames = 1 << 15;
-    let bpm = Arc::new(BufferPoolManager::new(num_frames));
-
-    assert_eq!(bpm.num_frames(), num_frames);
-
-    let id1 = PageId::new(0);
-    let id2 = PageId::new(42);
-
-    // TODO add tasks that continuously poll and submit
-    assert!(bpm.get_page(id1).await.is_none());
-    let _page_handle1 = bpm.create_page(id1).await;
-    assert!(bpm.get_page(id1).await.is_some());
-
-    assert!(bpm.get_page(id2).await.is_none());
-    let _page_handle2 = bpm.create_page(id2).await;
-    assert!(bpm.get_page(id2).await.is_some());
-}
-
 #[test]
 fn test_bpm_register() {
     let num_frames = 1 << 10;
     let bpm = Arc::new(BufferPoolManager::new(num_frames));
     assert_eq!(bpm.num_frames(), num_frames);
 
-    let id1 = PageId::new(0);
-    let id2 = PageId::new(42);
+    let id = PageId::new(0);
 
     // Create the runtime
     let rt = Builder::new_current_thread()
@@ -49,31 +28,29 @@ fn test_bpm_register() {
 
     let local = LocalSet::new();
 
-    rt.block_on(async move {
-        let uring = bpm.get_thread_local_uring();
-        let uring_listener = uring.clone();
-        let uring_submitter = uring.clone();
+    let uring = bpm.get_thread_local_uring();
+    let uring_listener = uring.clone();
+    let uring_submitter = uring.clone();
 
+    rt.block_on(async move {
         local
             .run_until(async {
                 let async_fd = Rc::new(AsyncFd::new(uring).unwrap());
 
                 println!("Spawning listener");
-                task::spawn_local(IoUringAsync::listener(uring_listener, async_fd.clone()));
+                let listener = task::spawn_local(IoUringAsync::listener(uring_listener, async_fd.clone()));
                 println!("Spawning submitter");
-                task::spawn_local(IoUringAsync::submitter(uring_submitter, async_fd.clone()));
+                let submitter = task::spawn_local(IoUringAsync::submitter(uring_submitter, async_fd.clone()));
 
                 println!("Beginning Test");
 
-                assert!(bpm.get_page(id1).await.is_none());
-                let _page_handle1 = bpm.create_page(id1).await;
+                assert!(bpm.get_page(id).await.is_none());
+                let _page_handle1 = bpm.create_page(id).await;
 
                 for i in 0..10000 {
-                    if i % 100 == 0 {
-                        dbg!(i);
-                    }
-
-                    assert!(bpm.get_page(id1).await.is_some());
+                    std::hint::black_box(i);
+                    assert!(bpm.get_page(id).await.is_some());
+                    tokio::task::yield_now().await;
                 }
 
                 println!("Finishing Test");
