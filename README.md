@@ -7,12 +7,15 @@ So it is on a global scheduler to assign tasks to worker threads appropriately.
 Once a task has been given to a worker thread, then the asynchronous runtime's
 scheduler is in charge of managing the cooperative tasks.
 
-An implication of the above is that this model will not work with `tokio`'s work-stealing multi-threaded runtime.
-However, the benefits of parallelism in this model at the cost of having to manually manage load balancing
-is likely worth it. Additionally, a DBMS that could theoretically use this model would likely have
+An implication of the above is that this model will not work with
+`tokio`'s work-stealing multi-threaded runtime.
+However, the benefits of parallelism in this model at the cost of
+having to manually manage load balancing is likely worth it.
+Additionally, a DBMS that could theoretically use this model would likely have
 better knowledge of how to schedule things appropriately.
 
-Finally, this is heavily inspired by [this Leanstore paper](https://www.vldb.org/pvldb/vol16/p2090-haas.pdf),
+Finally, this is heavily inspired by
+[this Leanstore paper](https://www.vldb.org/pvldb/vol16/p2090-haas.pdf),
 and future work could introduce the all-to-all model of threads to distinct SSDs,
 where each worker thread has a dedicated `io_uring` instance for every physical SSD.
 
@@ -22,14 +25,23 @@ where each worker thread has a dedicated `io_uring` instance for every physical 
 
 -   `PageHandle`: A shared pointer to a `Page` (through an `Arc`)
 -   Local `io_uring` instances (that are `!Send`)
--   Slab-allocated futures defining the lifecycle of an `io_uring` event (private)
+-   Futures stored in a local hash table defining the lifecycle of an `io_uring` event (private)
+
+### Local Daemons
+
+These thread-local daemons exist as foreground tasks, just like any other task the DBMS might have.
+
+-   Listener: Dedicated to polling local `io_uring` completion events
+-   Submitter: Dedicated to submitting `io_uring` submission entries
+-   Evictor: Dedicated to cooling `Hot` pages and evicting `Cool` pages
 
 ## Shared Objects
 
 -   Shared pre-registered buffers / frames
     -   Frames are owned types (can only belong to a specific `Page`)
     -   Frames also have pointers back to their parent `Page`s
--   Shared free list of frames (via a concurrent queue)
+    -   _Will have to register multiple sets, as you can only register 1024 frames at a time_
+-   Shared multi-producer multi-consumer channel of frames
 -   `Page`: A hybrid-latched (read-write locked for now) page header
     -   State is either `Unloaded`, `Loading` (private), or `Loaded`
         -   `Unloaded` implies that the data is not in memory
@@ -47,8 +59,8 @@ In summary, the possible states that the `Page` can be in is:
 
 -   `Loaded` and `Hot` (frequently accessed)
 -   `Loaded` and `Cool` (potential candidate for eviction)
--   `Loading` (`Hot`/`Cool` plus private `io_uring` event state)
--   `Unloaded` (`Hot`/`Cool`)
+-   `Loading` (`Hot`/`Cold` plus private `io_uring` event state)
+-   `Unloaded` (`Cold`)
 
 # Algorithms
 
@@ -68,14 +80,15 @@ Let P1 be the page we want to get write access for.
 
 ### Read Access Algorithm
 
-Let P1 be the page we want to get read access for. All optimistic reads have to be done through a closure.
+Let P1 be the page we want to get read access for.
+All optimistic reads have to be done through a read closure (cannot construct a reference `&`).
 
 -   Set eviction state to `Hot`
 -   Optimistically read P1
 -   If `Loaded` (HOT PATH):
     -   Read the page data optimistically and return
     -   If the optimistic read fails, fallback to a pessimistic read
-        -   If `Loaded` (SEMI-HOT PATH):
+        -   If still `Loaded` (SEMI-HOT PATH):
             -   Read normally and return
         -   Else it is now `Unloaded`, so continue
 -   The state is `Unloaded`, and we need to load a page
@@ -92,51 +105,23 @@ and the page eviction state will be `Hot`.
 
 -   If the page is `Loaded`, then immediately return
 -   Otherwise, this page is `Unloaded`
--   Check for free frames in the global free list
-    -   If there is a free frame, take ownership of the frame
-    -   Set the frame's parent pointer to P1
-    -   Read P1's data from disk into the buffer
-    -   `await` read completion from the local `io_uring` instance
--   Else there are no free frames, and we need to evict a page
-    -   Continue with the [Frame Transfer Algorithm](#frame-transfer-algorithm)
--   At the end, set the page eviction state to `Hot`
-
-### Frame Transfer Algorithm
-
-Let P1 be the page we want to load in from disk, and P2 be the page we will want to evict.
-The caller must also hold a write-lock on P1.
-
-Note that the random choice of a `Cool` page P2 into write locking P2 could potentially mean that
-other threads could make P2 `Hot` while the current thread is attempting to grab the write lock.
-
-We will make the decision to not allow readers to preempt writers.
-If P2 is actually a very frequently accessed page, then there was a low probability that we decided to
-evict it in the first place, and the future accessors will bring it back into memory anyways later.
-
--   Write-lock P1
--   Set P1 to `Loading`
--   Find a page to evict by looping over all `Cool` frames and picking a random one (we pick P2)
--   Write-lock P2
--   Write P2's buffer data out to disk via the local `io_uring` instance
--   `await` write completion from the local `io_uring` instance
--   Set P2 to `Unloaded`
--   Give ownership of P2's frame to P1
+-   `await` a free frame from the global channel of frames
 -   Set the frame's parent pointer to P1
--   Unlock P2
--   Read P1's data from disk into the buffer via the local `io_uring` instance
+-   Read P1's data from disk into the buffer
 -   `await` read completion from the local `io_uring` instance
--   Set P1 to `Loaded`
+-   At the end, set the page eviction state to `Hot`
 
 ### General Eviction Algorithm
 
-On every thread, there will be at least 1 "background" task (not scheduled by the global scheduler)
-dedicated to evicting pages. It will aim to have some certain threshold of free pages in the free list.
+On every worker thread, there should be at least 1 "background" task
+(not scheduled by the global scheduler) dedicated to evicting pages.
+It will aim to have some certain threshold of free pages in the free list.
 
 -   Iterate over all frames
 -   Collect the list of `Page`s that are `Loaded` (should not be more than the number of frames)
--   Collect all `Cool` pages
 -   For every `Page` that is `Hot`, change to `Cool`
--   Randomly choose some (small) constant number of pages from the list of initially `Cool`
+-   Collect all `Cool` pages
+-   Randomly choose some (small) constant number of pages from the list of initially `Cool` pages
 -   `join!` the following page eviction futures:
     -   For each page Px we want to evict:
         -   Check if Px has been changed to `Hot`, and if so, return early
@@ -145,5 +130,5 @@ dedicated to evicting pages. It will aim to have some certain threshold of free 
         -   Write Px's buffer data out to disk via the local `io_uring` instance
         -   `await` write completion from the local `io_uring` instance
         -   Set Px to `Unloaded`
-        -   Give ownership of Px's frame to the global free list of frames
+        -   Send Px's frame to the global channel of free frames
         -   Unlock Px
