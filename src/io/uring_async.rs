@@ -5,7 +5,7 @@ use std::{
     collections::HashMap,
     io,
     os::fd::{AsRawFd, RawFd},
-    rc::Rc, sync::Arc,
+    rc::Rc,
 };
 use tokio::io::unix::AsyncFd;
 
