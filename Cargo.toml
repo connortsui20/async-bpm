@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-crossbeam-queue = "0.3.11"
+async-channel = "2.2.0"
 io-uring = "0.6.3"
 libc = "0.2.153"
 send_wrapper = "0.6.0"

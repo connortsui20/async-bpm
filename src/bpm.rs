@@ -7,7 +7,7 @@ use crate::{
         Page, PageId, PageRef, PAGE_SIZE,
     },
 };
-use crossbeam_queue::ArrayQueue;
+use async_channel::{Receiver, Sender};
 use libc::iovec;
 use send_wrapper::SendWrapper;
 use std::{collections::HashMap, io::IoSlice, ops::Deref, sync::Arc};
@@ -19,7 +19,8 @@ use tokio::sync::{Mutex, RwLock};
 pub struct BufferPoolManager {
     num_frames: usize,
     pub(crate) active_pages: Mutex<Vec<PageRef>>,
-    pub(crate) free_frames: ArrayQueue<Frame>,
+    pub(crate) free_frames_tx: Sender<Frame>,
+    pub(crate) free_frames_rx: Receiver<Frame>,
     pub(crate) pages: RwLock<HashMap<PageId, PageRef>>,
     io_slices: &'static [IoSlice<'static>],
     io_urings: ThreadLocal<SendWrapper<IoUringAsync>>,
@@ -29,7 +30,7 @@ impl BufferPoolManager {
     /// Constructs a new buffer pool manager.
     pub fn new(num_frames: usize) -> Self {
         // All frames start out as free
-        let free_frames = ArrayQueue::new(num_frames);
+        let (tx, rx) = async_channel::bounded(num_frames);
 
         // Allocate all of the memory up front and leak
         let bytes: &'static mut [u8] = vec![0u8; num_frames * PAGE_SIZE].leak();
@@ -49,10 +50,8 @@ impl BufferPoolManager {
 
         for buf in buffers.iter().copied() {
             let frame = Frame::new(buf);
-            let res = free_frames.push(frame);
-            if res.is_err() {
-                panic!("Was not able to add the frame to the free_frames list");
-            }
+            tx.send_blocking(frame)
+                .expect("Was unable to send the initial frames onto the global free list");
         }
 
         let io_slices: &'static [IoSlice] = buffers.leak();
@@ -65,7 +64,8 @@ impl BufferPoolManager {
         Self {
             num_frames,
             active_pages: Mutex::new(Vec::with_capacity(num_frames)),
-            free_frames,
+            free_frames_tx: tx,
+            free_frames_rx: rx,
             pages: RwLock::new(HashMap::with_capacity(num_frames)),
             io_slices,
             io_urings: ThreadLocal::with_capacity(num_frames),

@@ -60,18 +60,23 @@ impl PageHandle {
             return;
         }
 
-        if let Some(mut frame) = self.page.bpm.free_frames.pop() {
-            let pages_guard = self.page.bpm.pages.read().await;
-            let current_page_ptr = pages_guard
-                .get(&self.page.pid)
-                .expect("Couldn't find ourselves in the global table of pages");
+        // Wait for a free frame
+        let mut frame = self
+            .page
+            .bpm
+            .free_frames_rx
+            .recv()
+            .await
+            .expect("channel was unexpectedly closed");
 
-            assert!(frame.parent.is_none());
-            frame.parent.replace(current_page_ptr.clone());
+        // Add the current page
+        assert!(frame.parent.is_none());
+        frame.parent.replace(self.page.clone());
 
-            todo!("Read our page's data from disk via a disk manager and await")
-        }
+        todo!("Read in the page's data from disk");
 
-        todo!("Else we need to evict")
+        self.page
+            .eviction_state
+            .store(TemperatureState::Hot, Ordering::Release);
     }
 }
