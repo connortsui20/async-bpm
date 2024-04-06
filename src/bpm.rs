@@ -6,16 +6,14 @@ use crate::{
     },
 };
 use async_channel::{Receiver, Sender};
+use futures::future;
 use std::{
     collections::{HashMap, HashSet},
     io::IoSlice,
     ops::Deref,
     sync::{atomic::Ordering, Arc},
 };
-use tokio::{
-    sync::{Mutex, RwLock},
-    task::JoinSet,
-};
+use tokio::sync::{Mutex, RwLock};
 
 /// A parallel Buffer Pool Manager that manages bringing logical pages from disk into memory via
 /// shared and fixed buffer frames.
@@ -128,10 +126,10 @@ impl BufferPoolManager {
     /// If it does not exist in the context of the buffer pool manager, returns `None`.
     ///
     /// If the page does not already exist, use `create_page` instead to get a `PageHandle`.
-    pub async fn get_page(self: &Arc<Self>, pid: PageId) -> Option<PageHandle> {
+    pub async fn get_page(self: &Arc<Self>, pid: &PageId) -> Option<PageHandle> {
         let pages_guard = self.pages.read().await;
 
-        let page = pages_guard.get(&pid)?.clone();
+        let page = pages_guard.get(pid)?.clone();
 
         let disk_manager_handle = self.disk_manager.create_handle();
 
@@ -142,37 +140,34 @@ impl BufferPoolManager {
         })
     }
 
+    async fn cool(self: &Arc<Self>, pid: &PageId) {
+        let page_handle = self
+            .get_page(pid)
+            .await
+            .expect("Could not find an active page in the map of pages");
+
+        match page_handle.page.eviction_state.load(Ordering::Acquire) {
+            TemperatureState::Cold => {
+                panic!("Found a Cold page in the active list of pages")
+            }
+            TemperatureState::Cool => page_handle.evict().await,
+            TemperatureState::Hot => page_handle
+                .page
+                .eviction_state
+                .store(TemperatureState::Cool, Ordering::Release),
+        }
+    }
+
     pub async fn evictor(self: &Arc<Self>) -> ! {
         let bpm = self.clone();
 
         loop {
-            let mut cool_pages = Vec::new();
-
             // Pages referenced in the `active_pages` list are guaranteed to own `Frame`s
             let active_guard = bpm.active_pages.lock().await;
 
-            for &pid in active_guard.deref() {
-                let page_handle = bpm
-                    .get_page(pid)
-                    .await
-                    .expect("Could not find an active page in the map of pages");
+            let futures = active_guard.deref().iter().map(|pid| self.cool(pid));
 
-                match page_handle.page.eviction_state.load(Ordering::Acquire) {
-                    TemperatureState::Cold => {
-                        panic!("Found a Cold page in the active list of pages")
-                    }
-                    TemperatureState::Cool => cool_pages.push(page_handle),
-                    TemperatureState::Hot => page_handle
-                        .page
-                        .eviction_state
-                        .store(TemperatureState::Cool, Ordering::Release),
-                }
-            }
-
-            // TODO make this a local join
-            for cool_page in cool_pages {
-                cool_page.evict().await;
-            }
+            future::join_all(futures).await;
         }
     }
 }
