@@ -82,7 +82,7 @@ impl DiskManager {
         {
             let ptr = self.io_slices.as_ptr() as *const iovec;
 
-            // Safety: Since the pointer came from a valid slice, and since `IoSlice` is ABI
+            // Safety: Since the pointer came from a valid slice, and since `IoSliceMut` is ABI
             // compatible with `iovec`, this is safe.
             let raw_buffers: &'static [iovec] =
                 unsafe { std::slice::from_raw_parts(ptr, self.io_slices.len()) };
@@ -110,11 +110,11 @@ pub struct DiskManagerHandle {
 }
 
 impl DiskManagerHandle {
-    pub async fn read_into(&self, pid: PageId, frame: Frame) -> Result<Frame, Frame> {
+    pub async fn read_into(&self, pid: PageId, mut frame: Frame) -> Result<Frame, Frame> {
         let fd = Fd(self.disk_manager.file.as_raw_fd());
 
         // Since we own the frame (and nobody else is reading from it), this is fine to mutate
-        let buf_ptr = frame.buf.as_ptr() as *mut u8;
+        let buf_ptr = frame.buf.as_mut_ptr();
 
         let entry = opcode::Read::new(fd, buf_ptr, PAGE_SIZE as u32)
             .offset(pid.offset())

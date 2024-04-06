@@ -1,16 +1,20 @@
 use crate::page::PageRef;
-use std::io::IoSlice;
+use std::io::IoSliceMut;
 
 /// An owned buffer frame, intended to be shared between user and kernel space.
 #[derive(Debug)]
 pub struct Frame {
-    pub(crate) buf: IoSlice<'static>,
+    /// The buffer that this [`Frame`] holds ownership over.
+    ///
+    /// Since [`Frame`] is not [`Clone`]able, this [`Frame`] is guaranteed to
+    /// have sole access to the inner [`IoSliceMut`].
+    pub(crate) buf: IoSliceMut<'static>,
     pub(crate) owner: Option<PageRef>,
 }
 
 impl Frame {
     /// Creates a new and owned [`Frame`] given a static [`IoSlice`].
-    pub fn new(ioslice: IoSlice<'static>) -> Self {
+    pub fn new(ioslice: IoSliceMut<'static>) -> Self {
         Self {
             buf: ioslice,
             owner: None,

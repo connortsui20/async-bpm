@@ -6,10 +6,12 @@ use crate::{
     },
 };
 use async_channel::{Receiver, Sender};
+use core::slice;
 use futures::future;
 use std::{
     collections::{HashMap, HashSet},
     io::IoSlice,
+    io::IoSliceMut,
     ops::Deref,
     sync::{atomic::Ordering, Arc},
 };
@@ -45,23 +47,36 @@ impl BufferPoolManager {
         let (tx, rx) = async_channel::bounded(num_frames);
 
         // Allocate all buffer memory up front and leak it so it never gets dropped
-        let io_slices = {
+        let io_slices: &'static [IoSlice<'static>] = {
             let bytes: &'static mut [u8] = vec![0u8; num_frames * PAGE_SIZE].leak();
 
             // Note: use `as_chunks_unchecked_mut()` when it is stabilized:
             // https://doc.rust-lang.org/std/primitive.slice.html#method.as_chunks_unchecked_mut
             let slices: Vec<&'static mut [u8]> = bytes.chunks_exact_mut(PAGE_SIZE).collect();
-            let buffers: Vec<IoSlice<'static>> =
-                slices.into_iter().map(|buf| IoSlice::new(buf)).collect();
 
-            // Create owned versions of each buffer and place them into th
-            for buf in buffers.iter().copied() {
-                let frame = Frame::new(buf);
+            // TODO docs
+            let mut register_buffers = Vec::with_capacity(slices.len());
+            let mut owned_buffers = Vec::with_capacity(slices.len());
+
+            // TODO docs
+            for buf in slices {
+                // TODO SAFETY
+                let register_buf = unsafe { slice::from_raw_parts(buf.as_ptr(), PAGE_SIZE) };
+                let io_slice = IoSlice::new(register_buf);
+
+                let io_slice_mut = IoSliceMut::new(buf);
+
+                register_buffers.push(io_slice);
+                owned_buffers.push(io_slice_mut);
+            }
+
+            for owned_buf in owned_buffers {
+                let frame = Frame::new(owned_buf);
                 tx.send_blocking(frame)
                     .expect("Was unable to send the initial frames onto the global free list");
             }
 
-            buffers.leak()
+            register_buffers.leak()
         };
 
         Self {
