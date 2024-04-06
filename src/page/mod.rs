@@ -35,6 +35,26 @@ impl PageId {
     pub fn new(id: u64) -> Self {
         Self { inner: id }
     }
+
+    pub fn as_u64(self) -> u64 {
+        Into::<u64>::into(self)
+    }
+
+    pub fn fd(&self) -> u32 {
+        todo!()
+    }
+
+    pub fn offset(&self) -> u64 {
+        self.inner * PAGE_SIZE as u64
+    }
+
+    pub fn buf_group(&self) -> u16 {
+        todo!()
+    }
+
+    pub fn buf_index(&self) -> u16 {
+        todo!()
+    }
 }
 
 /// We must always be able to convert a `PageId` into a unique 64-bit integer.

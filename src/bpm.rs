@@ -28,7 +28,7 @@ pub struct BufferPoolManager {
 
 impl BufferPoolManager {
     /// Constructs a new buffer pool manager with the given number of `PAGE_SIZE`ed buffer frames.
-    pub fn new(num_frames: usize) -> Self {
+    pub fn new(num_initial_pages: usize, num_frames: usize) -> Self {
         // All frames start out as free
         let (tx, rx) = async_channel::bounded(num_frames);
 
@@ -69,7 +69,11 @@ impl BufferPoolManager {
             num_frames,
             pages: RwLock::new(HashMap::with_capacity(num_frames)),
             free_frames: (tx, rx),
-            disk_manager: Arc::new(DiskManager::new(io_slices)),
+            disk_manager: Arc::new(DiskManager::new(
+                num_initial_pages,
+                "db.test".to_string(),
+                io_slices,
+            )),
         }
     }
 
