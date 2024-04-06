@@ -2,8 +2,8 @@
 
 use super::eviction::TemperatureState;
 use super::PageRef;
+use crate::disk::disk_manager::DiskManagerHandle;
 use crate::disk::frame::Frame;
-use crate::io::IoUringAsync;
 use crate::page::page_guard::{ReadPageGuard, WritePageGuard};
 use std::{ops::Deref, sync::atomic::Ordering};
 use tokio::sync::RwLockWriteGuard;
@@ -11,7 +11,7 @@ use tokio::sync::RwLockWriteGuard;
 /// A thread-local handle to a logical page of data.
 pub struct PageHandle {
     pub(crate) page: PageRef,
-    pub(crate) uring: IoUringAsync,
+    pub(crate) dm: DiskManagerHandle,
 }
 
 impl PageHandle {
@@ -58,13 +58,13 @@ impl PageHandle {
 
     /// Loads page data from disk into a frame in memory.
     async fn load(&self, guard: &mut RwLockWriteGuard<'_, Option<Frame>>) {
+        // If someone else got in front of us and loaded the page for us
         if guard.deref().is_some() {
-            // Someone else got in front of us and loaded the page for us
             return;
         }
 
         // Wait for a free frame
-        let mut frame = self
+        let frame = self
             .page
             .bpm
             .free_frames
@@ -73,14 +73,17 @@ impl PageHandle {
             .await
             .expect("channel was unexpectedly closed");
 
-        // Add the current page
-        assert!(frame.parent.is_none());
-        frame.parent.replace(self.page.clone());
+        assert!(frame.owner.is_none());
 
-        todo!("Read in the page's data from disk");
+        let mut frame = self.dm.read(self.page.pid, frame).await.unwrap();
 
-        // self.page
-        //     .eviction_state
-        //     .store(TemperatureState::Hot, Ordering::Release);
+        // Make the current page the frame's owner
+        frame.owner.replace(self.page.clone());
+
+        self.page
+            .eviction_state
+            .store(TemperatureState::Hot, Ordering::Release);
+
+        todo!()
     }
 }

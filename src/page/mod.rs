@@ -4,6 +4,7 @@ mod page_handle;
 pub(crate) mod eviction;
 
 use crate::{bpm::BufferPoolManager, disk::frame::Frame};
+use derivative::Derivative;
 use eviction::Temperature;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -15,10 +16,14 @@ pub use page_handle::*;
 pub const PAGE_SIZE: usize = 1 << 12;
 
 /// A shared logical [`Page`] object. All access should be done through a [`PageHandle`]()
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub struct Page {
     pub(crate) pid: PageId,
     pub(crate) eviction_state: Temperature,
     pub(crate) inner: RwLock<Option<Frame>>, // TODO change to hybrid latch
+
+    #[derivative(Debug = "ignore")]
     pub(crate) bpm: Arc<BufferPoolManager>,
 }
 
