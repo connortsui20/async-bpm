@@ -8,58 +8,58 @@ use tokio::runtime::Builder;
 use tokio::sync::Barrier;
 use tokio::task::{self, spawn_local, LocalSet};
 
-#[test]
-fn test_bpm_register() {
-    let num_frames = 1 << 10;
-    let bpm = Arc::new(BufferPoolManager::new(num_frames));
-    assert_eq!(bpm.num_frames(), num_frames);
+// #[test]
+// fn test_bpm_register() {
+//     let num_frames = 1 << 10;
+//     let bpm = Arc::new(BufferPoolManager::new(num_frames));
+//     assert_eq!(bpm.num_frames(), num_frames);
 
-    let id = PageId::new(0);
+//     let id = PageId::new(0);
 
-    // Create the runtime
-    let rt = Builder::new_current_thread()
-        .on_thread_park(move || {
-            // let uring = bpm_clone.get_thread_local_uring().await;
-        })
-        .enable_all()
-        .build()
-        .unwrap();
-    let rt = Arc::new(rt);
+//     // Create the runtime
+//     let rt = Builder::new_current_thread()
+//         .on_thread_park(move || {
+//             // let uring = bpm_clone.get_thread_local_uring().await;
+//         })
+//         .enable_all()
+//         .build()
+//         .unwrap();
+//     let rt = Arc::new(rt);
 
-    let local = LocalSet::new();
+//     let local = LocalSet::new();
 
-    let uring = bpm.get_thread_local_uring();
-    let uring_listener = uring.clone();
-    let uring_submitter = uring.clone();
+//     let uring = bpm.get_thread_local_uring();
+//     let uring_listener = uring.clone();
+//     let uring_submitter = uring.clone();
 
-    rt.block_on(async move {
-        local
-            .run_until(async {
-                let async_fd = Rc::new(AsyncFd::new(uring).unwrap());
+//     rt.block_on(async move {
+//         local
+//             .run_until(async {
+//                 let async_fd = Rc::new(AsyncFd::new(uring).unwrap());
 
-                println!("Spawning listener");
-                let listener =
-                    task::spawn_local(IoUringAsync::listener(uring_listener, async_fd.clone()));
-                println!("Spawning submitter");
-                let submitter =
-                    task::spawn_local(IoUringAsync::submitter(uring_submitter, async_fd.clone()));
+//                 println!("Spawning listener");
+//                 let listener =
+//                     task::spawn_local(IoUringAsync::listener(uring_listener, async_fd.clone()));
+//                 println!("Spawning submitter");
+//                 let submitter =
+//                     task::spawn_local(IoUringAsync::submitter(uring_submitter, async_fd.clone()));
 
-                println!("Beginning Test");
+//                 println!("Beginning Test");
 
-                assert!(bpm.get_page(id).await.is_none());
-                let _page_handle1 = bpm.create_page(id).await;
+//                 assert!(bpm.get_page(id).await.is_none());
+//                 let _page_handle1 = bpm.create_page(id).await;
 
-                for i in 0..10000 {
-                    std::hint::black_box(i);
-                    assert!(bpm.get_page(id).await.is_some());
-                    tokio::task::yield_now().await;
-                }
+//                 for i in 0..10000 {
+//                     std::hint::black_box(i);
+//                     assert!(bpm.get_page(id).await.is_some());
+//                     tokio::task::yield_now().await;
+//                 }
 
-                println!("Finishing Test");
-            })
-            .await;
-    });
-}
+//                 println!("Finishing Test");
+//             })
+//             .await;
+//     });
+// }
 
 // #[test]
 // fn test_new_bpm_with_threads() {

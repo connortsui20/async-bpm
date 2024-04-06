@@ -1,4 +1,5 @@
 use super::op::{Lifecycle, Op, OpInner};
+use derivative::Derivative;
 use io_uring::{squeue::Entry as SqEntry, IoUring};
 use std::{
     cell::RefCell,
@@ -15,10 +16,13 @@ pub const IO_URING_DEFAULT_ENTRIES: u16 = 1 << 12; // 4096
 /// A thread-local `io_uring` instance that can be embedded in an asynchronous runtime.
 ///
 /// Implicitly, `IoUringAsync` _must_ be thread-local since it is `!Send`.
-#[derive(Clone)]
+#[derive(Derivative)]
+#[derivative(Debug, Clone)]
 pub struct IoUringAsync {
     /// The thread-local `io_uring` instance.
+    #[derivative(Debug = "ignore")]
     pub(crate) uring: Rc<RefCell<IoUring>>,
+
     /// A thread-local table of unique operation IDs mapped to current in-flight operation states.
     operations: Rc<RefCell<HashMap<u64, Lifecycle>>>,
 }

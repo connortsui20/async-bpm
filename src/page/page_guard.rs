@@ -12,6 +12,7 @@ use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
 ///
 /// This guard can only be dereferenced in read mode, but other tasks (potentially on different
 /// worker threads) are allowed to read from this same page.
+#[derive(Debug)]
 pub struct ReadPageGuard<'a> {
     guard: RwLockReadGuard<'a, Option<Frame>>,
 }
@@ -44,6 +45,7 @@ impl<'a> Deref for ReadPageGuard<'a> {
 ///
 /// This guard can be dereferenced in both read and write mode, and no other tasks or threads can
 /// access the page's data while a task has this guard.
+#[derive(Debug)]
 pub struct WritePageGuard<'a> {
     guard: RwLockWriteGuard<'a, Option<Frame>>,
 }

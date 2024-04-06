@@ -2,16 +2,20 @@
 
 use super::eviction::TemperatureState;
 use super::PageRef;
+use crate::bpm::BufferPoolManager;
+use crate::disk::disk_manager::DiskManagerHandle;
 use crate::disk::frame::Frame;
-use crate::io::IoUringAsync;
 use crate::page::page_guard::{ReadPageGuard, WritePageGuard};
+use std::sync::Arc;
 use std::{ops::Deref, sync::atomic::Ordering};
 use tokio::sync::RwLockWriteGuard;
 
 /// A thread-local handle to a logical page of data.
+#[derive(Debug)]
 pub struct PageHandle {
     pub(crate) page: PageRef,
-    pub(crate) uring: IoUringAsync,
+    pub(crate) bpm: Arc<BufferPoolManager>,
+    pub(crate) dm: DiskManagerHandle,
 }
 
 impl PageHandle {
@@ -58,29 +62,88 @@ impl PageHandle {
 
     /// Loads page data from disk into a frame in memory.
     async fn load(&self, guard: &mut RwLockWriteGuard<'_, Option<Frame>>) {
+        // If someone else got in front of us and loaded the page for us
         if guard.deref().is_some() {
-            // Someone else got in front of us and loaded the page for us
             return;
         }
 
         // Wait for a free frame
-        let mut frame = self
-            .page
+        let frame = self
             .bpm
             .free_frames
             .1
             .recv()
             .await
-            .expect("channel was unexpectedly closed");
+            .expect("Free frames channel was unexpectedly closed");
 
-        // Add the current page
-        assert!(frame.parent.is_none());
-        frame.parent.replace(self.page.clone());
+        assert!(frame.owner.is_none());
 
-        todo!("Read in the page's data from disk");
+        // Read the data in from disk via the disk manager
+        let mut frame = self
+            .dm
+            .read_into(self.page.pid, frame)
+            .await
+            .unwrap_or_else(|_| {
+                panic!(
+                    "Was unable to read data from page {:?} from disk",
+                    self.page.pid
+                )
+            });
 
-        // self.page
-        //     .eviction_state
-        //     .store(TemperatureState::Hot, Ordering::Release);
+        // Make the current page the frame's owner
+        frame.owner.replace(self.page.clone());
+
+        // Add to the set of active pages
+        let mut active_guard = self.bpm.active_pages.lock().await;
+        active_guard.insert(self.page.pid);
+
+        // Update the eviction state
+        self.page
+            .eviction_state
+            .store(TemperatureState::Hot, Ordering::Release);
+
+        todo!()
+    }
+
+    async fn evict(&self, guard: &mut RwLockWriteGuard<'_, Option<Frame>>) {
+        if guard.deref().is_none() {
+            // There is nothing for us to evict
+            return;
+        }
+
+        let frame = guard.take().unwrap();
+
+        // Write the data out to disk
+        let frame = self
+            .dm
+            .write_from(self.page.pid, frame)
+            .await
+            .unwrap_or_else(|_| {
+                panic!(
+                    "Was unable to write data from page {:?} to disk",
+                    self.page.pid
+                )
+            });
+
+        // Remove from the set of active pages
+        let mut active_guard = self.bpm.active_pages.lock().await;
+        let remove_res = active_guard.remove(&self.page.pid);
+        assert!(
+            remove_res,
+            "Removed an active page that was somehow not in the active pages set"
+        );
+
+        // Update the eviction state
+        self.page
+            .eviction_state
+            .store(TemperatureState::Cold, Ordering::Release);
+
+        // Free the frame
+        self.bpm
+            .free_frames
+            .0
+            .send(frame)
+            .await
+            .expect("Free frames channel was unexpectedly closed");
     }
 }

@@ -3,7 +3,7 @@ mod page_handle;
 
 pub(crate) mod eviction;
 
-use crate::{bpm::BufferPoolManager, disk::frame::Frame};
+use crate::disk::frame::Frame;
 use eviction::Temperature;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -15,11 +15,11 @@ pub use page_handle::*;
 pub const PAGE_SIZE: usize = 1 << 12;
 
 /// A shared logical [`Page`] object. All access should be done through a [`PageHandle`]()
+#[derive(Debug)]
 pub struct Page {
     pub(crate) pid: PageId,
     pub(crate) eviction_state: Temperature,
     pub(crate) inner: RwLock<Option<Frame>>, // TODO change to hybrid latch
-    pub(crate) bpm: Arc<BufferPoolManager>,
 }
 
 pub type PageRef = Arc<Page>;
@@ -33,6 +33,26 @@ pub struct PageId {
 impl PageId {
     pub fn new(id: u64) -> Self {
         Self { inner: id }
+    }
+
+    pub fn as_u64(self) -> u64 {
+        Into::<u64>::into(self)
+    }
+
+    pub fn fd(&self) -> u32 {
+        todo!()
+    }
+
+    pub fn offset(&self) -> u64 {
+        self.inner * PAGE_SIZE as u64
+    }
+
+    pub fn buf_group(&self) -> u16 {
+        todo!()
+    }
+
+    pub fn buf_index(&self) -> u16 {
+        todo!()
     }
 }
 
