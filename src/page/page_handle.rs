@@ -105,11 +105,21 @@ impl PageHandle {
         todo!()
     }
 
-    async fn evict(&self, guard: &mut RwLockWriteGuard<'_, Option<Frame>>) {
+    pub async fn evict(&self) {
+        let mut guard = self.page.inner.write().await;
+
         if guard.deref().is_none() {
             // There is nothing for us to evict
             return;
         }
+
+        // Remove from the set of active pages
+        let mut active_guard = self.bpm.active_pages.lock().await;
+        let remove_res = active_guard.remove(&self.page.pid);
+        assert!(
+            remove_res,
+            "Removed an active page that was somehow not in the active pages set"
+        );
 
         let frame = guard.take().unwrap();
 
@@ -124,14 +134,6 @@ impl PageHandle {
                     self.page.pid
                 )
             });
-
-        // Remove from the set of active pages
-        let mut active_guard = self.bpm.active_pages.lock().await;
-        let remove_res = active_guard.remove(&self.page.pid);
-        assert!(
-            remove_res,
-            "Removed an active page that was somehow not in the active pages set"
-        );
 
         // Update the eviction state
         self.page

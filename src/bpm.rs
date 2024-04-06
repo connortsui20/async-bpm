@@ -9,9 +9,13 @@ use async_channel::{Receiver, Sender};
 use std::{
     collections::{HashMap, HashSet},
     io::IoSlice,
-    sync::Arc,
+    ops::Deref,
+    sync::{atomic::Ordering, Arc},
 };
-use tokio::sync::{Mutex, RwLock};
+use tokio::{
+    sync::{Mutex, RwLock},
+    task::JoinSet,
+};
 
 /// A parallel Buffer Pool Manager that manages bringing logical pages from disk into memory via
 /// shared and fixed buffer frames.
@@ -136,5 +140,39 @@ impl BufferPoolManager {
             bpm: self.clone(),
             dm: disk_manager_handle,
         })
+    }
+
+    pub async fn evictor(self: &Arc<Self>) -> ! {
+        let bpm = self.clone();
+
+        loop {
+            let mut cool_pages = Vec::new();
+
+            // Pages referenced in the `active_pages` list are guaranteed to own `Frame`s
+            let active_guard = bpm.active_pages.lock().await;
+
+            for &pid in active_guard.deref() {
+                let page_handle = bpm
+                    .get_page(pid)
+                    .await
+                    .expect("Could not find an active page in the map of pages");
+
+                match page_handle.page.eviction_state.load(Ordering::Acquire) {
+                    TemperatureState::Cold => {
+                        panic!("Found a Cold page in the active list of pages")
+                    }
+                    TemperatureState::Cool => cool_pages.push(page_handle),
+                    TemperatureState::Hot => page_handle
+                        .page
+                        .eviction_state
+                        .store(TemperatureState::Cool, Ordering::Release),
+                }
+            }
+
+            // TODO make this a local join
+            for cool_page in cool_pages {
+                cool_page.evict().await;
+            }
+        }
     }
 }
