@@ -11,6 +11,7 @@ use tokio::sync::RwLock;
 
 /// A parallel Buffer Pool Manager that manages bringing logical pages from disk into memory via
 /// shared and fixed buffer frames.
+#[derive(Debug)]
 pub struct BufferPoolManager {
     /// The total number of buffer frames this Buffer Pool Manager manages.
     num_frames: usize,

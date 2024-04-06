@@ -24,7 +24,7 @@ pub(super) enum Lifecycle {
 ///
 /// Holds a reference to the thread-local `HashMap` of all in-flight operations, as well as a unique
 /// operation ID to help uniquely identify the operation.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub(super) struct OpInner {
     /// A thread-local table of unique operation IDs mapped to current in-flight operation states.
     pub(super) operations: Rc<RefCell<HashMap<u64, Lifecycle>>>,
@@ -79,6 +79,7 @@ impl Future for OpInner {
 }
 
 /// A wrapper around an optionally owned `OpInner` type.
+#[derive(Debug)]
 pub struct Op {
     /// Ownership over the `OpInner` value is moved to a new tokio task when an `Op` is dropped.
     pub(super) inner: Option<OpInner>,

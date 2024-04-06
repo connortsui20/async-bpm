@@ -9,6 +9,7 @@ use std::{ops::Deref, sync::atomic::Ordering};
 use tokio::sync::RwLockWriteGuard;
 
 /// A thread-local handle to a logical page of data.
+#[derive(Debug)]
 pub struct PageHandle {
     pub(crate) page: PageRef,
     pub(crate) dm: DiskManagerHandle,

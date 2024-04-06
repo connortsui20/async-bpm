@@ -6,6 +6,7 @@ use thread_local::ThreadLocal;
 
 use super::frame::Frame;
 
+#[derive(Debug)]
 pub struct DiskManager {
     /// A slice of buffers, used solely to register into new [`IoUringAsync`] instances.
     ///
@@ -73,6 +74,7 @@ impl DiskManager {
     }
 }
 
+#[derive(Debug)]
 pub struct DiskManagerHandle {
     disk_manager: Arc<DiskManager>,
     uring: IoUringAsync,
