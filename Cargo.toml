@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 async-channel = "2.2.0"
 derivative = "2.2.0"
+futures = "0.3.30"
 io-uring = "0.6.3"
 libc = "0.2.153"
 send_wrapper = "0.6.0"
