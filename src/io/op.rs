@@ -4,7 +4,9 @@ use io_uring::cqueue::Entry as CqEntry;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::future::Future;
+use std::pin::Pin;
 use std::rc::Rc;
+use std::task::{Context, Poll};
 
 /// The `IoUring` lifecycle state.
 #[derive(Debug)]
@@ -18,6 +20,10 @@ pub(super) enum Lifecycle {
     Completed(CqEntry),
 }
 
+/// The inner representation of an `io_uring` operation.
+///
+/// Holds a reference to the thread-local `HashMap` of all in-flight operations, as well as a unique
+/// operation ID to help uniquely identify the operation.
 #[derive(Clone)]
 pub(super) struct OpInner {
     /// A thread-local table of unique operation IDs mapped to current in-flight operation states.
@@ -27,6 +33,8 @@ pub(super) struct OpInner {
 }
 
 impl Drop for OpInner {
+    /// The `OpInner` type can only be dropped once the operation has reached the
+    /// [`Completed`](Lifecycle::Completed) state, at which point it is safe to drop.
     fn drop(&mut self) {
         let mut guard = self.operations.borrow_mut();
         let lifecycle = guard.remove(&self.id);
@@ -40,10 +48,15 @@ impl Drop for OpInner {
 impl Future for OpInner {
     type Output = CqEntry;
 
-    fn poll(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
+    /// We want to check if the operation has completed, at which point we will want to return
+    /// [`Poll::Ready`].
+    ///
+    /// Otherwise, we will wait to be waken up by
+    /// [`IoUringAsync::poll`](crate::io::IoUringAsync::poll).
+    ///
+    /// It is the caller's responsibility to ensure that there is a task or local daemon that is
+    /// dedicated to polling `io_uring` via [`IoUringAsync::poll`](crate::io::IoUringAsync::poll).
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut guard = self.operations.borrow_mut();
 
         // This is safe to unwrap since we only remove the `Lifecycle` from the table after we get
@@ -54,13 +67,13 @@ impl Future for OpInner {
         match lifecycle {
             Lifecycle::Unsubmitted => {
                 *lifecycle = Lifecycle::Waiting(cx.waker().clone());
-                std::task::Poll::Pending
+                Poll::Pending
             }
             Lifecycle::Waiting(_) => {
                 *lifecycle = Lifecycle::Waiting(cx.waker().clone());
-                std::task::Poll::Pending
+                Poll::Pending
             }
-            Lifecycle::Completed(cqe) => std::task::Poll::Ready(cqe.clone()),
+            Lifecycle::Completed(cqe) => Poll::Ready(cqe.clone()),
         }
     }
 }
@@ -71,9 +84,9 @@ pub struct Op {
     pub(super) inner: Option<OpInner>,
 }
 
-/// If `Op` gets dropped before it has finished its operation, someone has to clean up.
-/// The inner future is spawned again as a task onto the current thread, where it will complete.
 impl Drop for Op {
+    /// If `Op` gets dropped before it has finished its operation, someone has to clean up.
+    // The inner future is spawned again as a task onto the current thread, where it will complete.
     fn drop(&mut self) {
         // We only take the `OpInner` out once (here during `drop`), so this is safe to unwrap
         let inner = self.inner.take().unwrap();
@@ -94,11 +107,8 @@ impl Drop for Op {
 impl Future for Op {
     type Output = CqEntry;
 
-    /// Simply poll the inner `OpInner`.
-    fn poll(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
+    /// Simply polls the inner `OpInner`.
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         // `inner` is only `None` after we drop `Op`, so we can unwrap safely
         std::pin::Pin::new(self.inner.as_mut().unwrap()).poll(cx)
     }

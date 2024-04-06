@@ -9,11 +9,12 @@ use std::{
 };
 use tokio::io::unix::AsyncFd;
 
+/// The default number of `io_uring` submission entries.
 pub const IO_URING_DEFAULT_ENTRIES: u16 = 1 << 12; // 4096
 
 /// A thread-local `io_uring` instance that can be embedded in an asynchronous runtime.
 ///
-/// Implicitly, it must be thread-local since it is `!Send`.
+/// Implicitly, `IoUringAsync` _must_ be thread-local since it is `!Send`.
 #[derive(Clone)]
 pub struct IoUringAsync {
     /// The thread-local `io_uring` instance.
@@ -23,6 +24,8 @@ pub struct IoUringAsync {
 }
 
 impl IoUringAsync {
+    /// Creates a new thread-local `IoUringAsync` instance that can support holding `entries`
+    /// submission queue entries.
     pub fn new(entries: u16) -> io::Result<Self> {
         Ok(Self {
             uring: Rc::new(RefCell::new(io_uring::IoUring::new(entries as u32)?)),
@@ -30,27 +33,19 @@ impl IoUringAsync {
         })
     }
 
+    /// Calls [`IoUringAsync::new`] with `IO_URING_DEFAULT_ENTRIES` entries.
     pub fn try_default() -> io::Result<Self> {
-        Ok(Self {
-            uring: Rc::new(RefCell::new(io_uring::IoUring::new(
-                IO_URING_DEFAULT_ENTRIES as u32,
-            )?)),
-            operations: Rc::new(RefCell::new(HashMap::with_capacity(
-                IO_URING_DEFAULT_ENTRIES as usize,
-            ))),
-        })
+        Self::new(IO_URING_DEFAULT_ENTRIES)
     }
 
     /// Continuously polls the completion queue and updates any local in-flight operation states.
     ///
     /// This `Future` _must_ be placed onto the task queue of a thread _at least_ once, otherwise no
     /// `Op` futures will ever make progress.
-    ///
-    /// TODO figure out if this is what we actually want
     pub async fn listener(uring: Self, async_fd: Rc<AsyncFd<IoUringAsync>>) -> ! {
         loop {
             let mut guard = async_fd.writable().await.unwrap();
-            println!("Listening");
+
             guard.get_inner().poll();
             guard.clear_ready();
         }
@@ -58,17 +53,19 @@ impl IoUringAsync {
 
     /// Continuously submits entries on the submission queue.
     ///
+    /// Note that submission is not the same thing as pushing an operation onto the `io_uring`
+    /// submission queue. Use [`IoUringAsync::push`] to place operations onto the submission queue,
+    /// and use [`IoUringAsync::submit`] to manually submit said operations to the kernel.
+    ///
     /// Will panic if submission fails.
     ///
     /// Either this `Future` _must_ be placed onto the task queue of a thread _at least_ once, or
     /// the caller must ensure that they manually call [`IoUringAsync::submit`] at regular intervals
     /// otherwise no `Op` futures will ever make progress.
-    ///
-    /// TODO figure out if this is what we actually want
     pub async fn submitter(uring: Self, async_fd: Rc<AsyncFd<IoUringAsync>>) -> ! {
         loop {
             let mut guard = async_fd.writable().await.unwrap();
-            println!("Submitting");
+
             guard.get_inner().submit().expect(
                 "Something went wrong when trying to submit \
                 `io_uring` operation events on the submission queue",
@@ -126,6 +123,14 @@ impl IoUringAsync {
         }
     }
 
+    /// Poll the `io_uring` completion queue for completed events.
+    ///
+    /// This function will iterate over any completed `io_uring` operations and update the
+    /// respective `Lifecycle` state in the `HashMap` of in-flight operations.
+    ///
+    /// It is then on the caller to `.await` the [`Future`](std::future::Future) returned by
+    /// [`IoUringAsync::push`] to observe the result of the operation, as well as remove it from the
+    /// `HashMap` of current in-flight operations by [`Future`](std::future::Future).
     pub fn poll(&self) {
         let mut uring_guard = self.uring.borrow_mut();
         let completion_queue = uring_guard.completion();
@@ -163,6 +168,7 @@ impl IoUringAsync {
     }
 }
 
+/// Intended for use with the `tokio` runtime.
 impl AsRawFd for IoUringAsync {
     fn as_raw_fd(&self) -> RawFd {
         self.uring.borrow().as_raw_fd()

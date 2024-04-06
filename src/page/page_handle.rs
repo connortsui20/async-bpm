@@ -1,3 +1,5 @@
+//! Implementation of the `PageHandle` type.
+
 use super::eviction::TemperatureState;
 use super::PageRef;
 use crate::frame::Frame;
@@ -26,7 +28,7 @@ impl PageHandle {
             return ReadPageGuard::new(read_guard);
         }
 
-        // We need to load the page into memory with a write guard
+        // Otherwise we need to load the page into memory with a write guard
         drop(read_guard);
         let mut write_guard = self.page.inner.write().await;
 
@@ -48,6 +50,7 @@ impl PageHandle {
             return WritePageGuard::new(write_guard);
         }
 
+        // Otherwise we need to load the page into memory
         self.load(&mut write_guard).await;
 
         WritePageGuard::new(write_guard)

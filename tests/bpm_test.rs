@@ -38,9 +38,11 @@ fn test_bpm_register() {
                 let async_fd = Rc::new(AsyncFd::new(uring).unwrap());
 
                 println!("Spawning listener");
-                let listener = task::spawn_local(IoUringAsync::listener(uring_listener, async_fd.clone()));
+                let listener =
+                    task::spawn_local(IoUringAsync::listener(uring_listener, async_fd.clone()));
                 println!("Spawning submitter");
-                let submitter = task::spawn_local(IoUringAsync::submitter(uring_submitter, async_fd.clone()));
+                let submitter =
+                    task::spawn_local(IoUringAsync::submitter(uring_submitter, async_fd.clone()));
 
                 println!("Beginning Test");
 

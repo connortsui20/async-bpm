@@ -3,8 +3,7 @@ use crate::{
     io::IoUringAsync,
     page::{
         eviction::{Temperature, TemperatureState},
-        page_handle::PageHandle,
-        Page, PageId, PageRef, PAGE_SIZE,
+        Page, PageHandle, PageId, PageRef, PAGE_SIZE,
     },
 };
 use async_channel::{Receiver, Sender};
@@ -27,7 +26,7 @@ pub struct BufferPoolManager {
 }
 
 impl BufferPoolManager {
-    /// Constructs a new buffer pool manager.
+    /// Constructs a new buffer pool manager with the given number of `PAGE_SIZE`ed buffer frames.
     pub fn new(num_frames: usize) -> Self {
         // All frames start out as free
         let (tx, rx) = async_channel::bounded(num_frames);
@@ -77,7 +76,9 @@ impl BufferPoolManager {
         self.num_frames
     }
 
-    // TODO docs
+    /// TODO docs
+    ///
+    /// Probably don't want to expose this anyways and use a disk manager.
     pub fn get_thread_local_uring(&self) -> IoUringAsync {
         match self.io_urings.get() {
             Some(uring) => uring.deref().clone(),
@@ -95,7 +96,9 @@ impl BufferPoolManager {
         }
     }
 
-    // TODO docs
+    /// TODO docs
+    ///
+    /// Probably don't want to expose this anyways and use a disk manager.
     fn register_buffers(&self, uring: &mut IoUringAsync) {
         let ptr = self.io_slices.as_ptr() as *const iovec;
 
@@ -106,7 +109,9 @@ impl BufferPoolManager {
 
         let raw_uring = uring.uring.borrow_mut();
 
-        // TODO safety
+        // Safety: Since the slice came from `io_slices`, which has a fully `'static` lifetime in
+        // both the slice of buffers and the buffers themselves, and since [`IoSlice`] is ABI
+        // compatible with the `iovec` type, this is safe.
         unsafe { raw_uring.submitter().register_buffers(raw_buffers) }
             .expect("Was unable to register buffers");
     }
@@ -137,8 +142,6 @@ impl BufferPoolManager {
 
     /// Constructs a thread-local handle to a logical page, as long as the page already exists.
     /// If it does not exist in the context of the buffer pool manager, returns `None`.
-    ///
-    /// TODO figure out how to properly handle `IoUringAsync` creation failure
     ///
     /// If the page does not already exist, use `create_page` instead to get a `PageHandle`.
     pub async fn get_page(self: &Arc<Self>, pid: PageId) -> Option<PageHandle> {

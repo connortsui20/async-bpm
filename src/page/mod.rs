@@ -1,14 +1,20 @@
+mod page_guard;
+mod page_handle;
+
 pub(crate) mod eviction;
-pub(crate) mod page_guard;
-pub(crate) mod page_handle;
 
 use crate::{bpm::BufferPoolManager, frame::Frame};
 use eviction::Temperature;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+pub use page_guard::*;
+pub use page_handle::*;
+
+/// The size of a buffer [`Frame`] / logical [`Page`] of data.
 pub const PAGE_SIZE: usize = 1 << 12;
 
+/// A shared logical [`Page`] object. All access should be done through a [`PageHandle`]()
 pub struct Page {
     pub(crate) pid: PageId,
     pub(crate) eviction_state: Temperature,
@@ -18,6 +24,7 @@ pub struct Page {
 
 pub type PageRef = Arc<Page>;
 
+/// A unique identifier for a shared [`Page`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PageId {
     inner: u64,
