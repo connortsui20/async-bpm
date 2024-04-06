@@ -76,7 +76,7 @@ impl PageHandle {
 
         assert!(frame.owner.is_none());
 
-        let mut frame = self.dm.read(self.page.pid, frame).await.unwrap();
+        let mut frame = self.dm.read_into(self.page.pid, frame).await.unwrap();
 
         // Make the current page the frame's owner
         frame.owner.replace(self.page.clone());

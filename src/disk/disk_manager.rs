@@ -110,7 +110,7 @@ pub struct DiskManagerHandle {
 }
 
 impl DiskManagerHandle {
-    pub async fn read(&self, pid: PageId, frame: Frame) -> Result<Frame, Frame> {
+    pub async fn read_into(&self, pid: PageId, frame: Frame) -> Result<Frame, Frame> {
         let fd = Fd(self.disk_manager.file.as_raw_fd());
 
         // Since we own the frame (and nobody else is reading from it), this is fine to mutate
@@ -132,7 +132,7 @@ impl DiskManagerHandle {
         }
     }
 
-    pub async fn write(&self, pid: PageId, frame: Frame) -> Result<Frame, Frame> {
+    pub async fn write_from(&self, pid: PageId, frame: Frame) -> Result<Frame, Frame> {
         let fd = Fd(self.disk_manager.file.as_raw_fd());
 
         let buf_ptr = frame.buf.as_ptr();
