@@ -11,17 +11,24 @@ use libc::iovec;
 use send_wrapper::SendWrapper;
 use std::{collections::HashMap, io::IoSlice, ops::Deref, sync::Arc};
 use thread_local::ThreadLocal;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 
 /// A parallel Buffer Pool Manager that manages bringing logical pages from disk into memory via
 /// shared and fixed buffer frames.
 pub struct BufferPoolManager {
+    /// The total number of buffer frames this Buffer Pool Manager manges.
     num_frames: usize,
-    pub(crate) active_pages: Mutex<Vec<PageRef>>,
-    pub(crate) free_frames_tx: Sender<Frame>,
-    pub(crate) free_frames_rx: Receiver<Frame>,
+
+    /// A mapping between unique [`PageId`]s and shared [`PageRef`] handles.
     pub(crate) pages: RwLock<HashMap<PageId, PageRef>>,
+
+    /// A channel of free, owned buffer [`Frame`]s.
+    pub(crate) free_frames: (Sender<Frame>, Receiver<Frame>),
+
+    /// A slice of buffers, used solely to register into new [`IoUringAsync`] instances.
     io_slices: &'static [IoSlice<'static>],
+
+    /// Thread-local `IoUringAsync` instances.
     io_urings: ThreadLocal<SendWrapper<IoUringAsync>>,
 }
 
@@ -62,9 +69,7 @@ impl BufferPoolManager {
 
         Self {
             num_frames,
-            active_pages: Mutex::new(Vec::with_capacity(num_frames)),
-            free_frames_tx: tx,
-            free_frames_rx: rx,
+            free_frames: (tx, rx),
             pages: RwLock::new(HashMap::with_capacity(num_frames)),
             io_slices,
             io_urings: ThreadLocal::with_capacity(num_frames),

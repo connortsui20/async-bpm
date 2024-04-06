@@ -67,7 +67,8 @@ impl PageHandle {
         let mut frame = self
             .page
             .bpm
-            .free_frames_rx
+            .free_frames
+            .1
             .recv()
             .await
             .expect("channel was unexpectedly closed");
@@ -78,8 +79,8 @@ impl PageHandle {
 
         todo!("Read in the page's data from disk");
 
-        self.page
-            .eviction_state
-            .store(TemperatureState::Hot, Ordering::Release);
+        // self.page
+        //     .eviction_state
+        //     .store(TemperatureState::Hot, Ordering::Release);
     }
 }
