@@ -1,5 +1,5 @@
 use crate::{
-    frame::Frame,
+    disk::frame::Frame,
     io::IoUringAsync,
     page::{
         eviction::{Temperature, TemperatureState},

@@ -3,7 +3,7 @@ mod page_handle;
 
 pub(crate) mod eviction;
 
-use crate::{bpm::BufferPoolManager, frame::Frame};
+use crate::{bpm::BufferPoolManager, disk::frame::Frame};
 use eviction::Temperature;
 use std::sync::Arc;
 use tokio::sync::RwLock;

@@ -2,7 +2,7 @@
 
 use super::eviction::TemperatureState;
 use super::PageRef;
-use crate::frame::Frame;
+use crate::disk::frame::Frame;
 use crate::io::IoUringAsync;
 use crate::page::page_guard::{ReadPageGuard, WritePageGuard};
 use std::{ops::Deref, sync::atomic::Ordering};
