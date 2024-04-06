@@ -6,18 +6,28 @@ use crate::{
     },
 };
 use async_channel::{Receiver, Sender};
-use std::{collections::HashMap, io::IoSlice, sync::Arc};
-use tokio::sync::RwLock;
+use std::{
+    collections::{HashMap, HashSet},
+    io::IoSlice,
+    sync::Arc,
+};
+use tokio::sync::{Mutex, RwLock};
 
 /// A parallel Buffer Pool Manager that manages bringing logical pages from disk into memory via
 /// shared and fixed buffer frames.
 #[derive(Debug)]
 pub struct BufferPoolManager {
-    /// The total number of buffer frames this Buffer Pool Manager manages.
+    /// The total number of buffer frames this [`BufferPoolManager`] manages.
     num_frames: usize,
 
     /// A mapping between unique [`PageId`]s and shared [`PageRef`] handles.
     pub(crate) pages: RwLock<HashMap<PageId, PageRef>>,
+
+    /// A collection of [`PageId`]s that currently have their data in memory.
+    ///
+    /// Used to help find pages to evict from memory. The [`BufferPoolManager`] must maintain this
+    /// [`HashSet`] by ensuring it is synced with the pages that are brought into memory.
+    pub(crate) active_pages: Mutex<HashSet<PageId>>,
 
     /// A channel of free, owned buffer [`Frame`]s.
     pub(crate) free_frames: (Sender<Frame>, Receiver<Frame>),
@@ -67,6 +77,7 @@ impl BufferPoolManager {
 
         Self {
             num_frames,
+            active_pages: Mutex::new(HashSet::with_capacity(num_frames)),
             pages: RwLock::new(HashMap::with_capacity(num_frames)),
             free_frames: (tx, rx),
             disk_manager: Arc::new(DiskManager::new(
@@ -96,7 +107,6 @@ impl BufferPoolManager {
             pid,
             eviction_state: Temperature::new(TemperatureState::Cold),
             inner: RwLock::new(None),
-            bpm: self.clone(),
         });
 
         pages_guard.insert(pid, page.clone());
@@ -105,6 +115,7 @@ impl BufferPoolManager {
 
         Some(PageHandle {
             page,
+            bpm: self.clone(),
             dm: disk_manager_handle,
         })
     }
@@ -122,6 +133,7 @@ impl BufferPoolManager {
 
         Some(PageHandle {
             page,
+            bpm: self.clone(),
             dm: disk_manager_handle,
         })
     }

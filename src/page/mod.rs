@@ -3,7 +3,7 @@ mod page_handle;
 
 pub(crate) mod eviction;
 
-use crate::{bpm::BufferPoolManager, disk::frame::Frame};
+use crate::disk::frame::Frame;
 use eviction::Temperature;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -20,7 +20,6 @@ pub struct Page {
     pub(crate) pid: PageId,
     pub(crate) eviction_state: Temperature,
     pub(crate) inner: RwLock<Option<Frame>>, // TODO change to hybrid latch
-    pub(crate) bpm: Arc<BufferPoolManager>,
 }
 
 pub type PageRef = Arc<Page>;
