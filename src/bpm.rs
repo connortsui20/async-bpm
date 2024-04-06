@@ -44,37 +44,24 @@ impl BufferPoolManager {
         // All frames start out as free
         let (tx, rx) = async_channel::bounded(num_frames);
 
+        // Allocate all buffer memory up front and leak it so it never gets dropped
         let io_slices = {
-            // Allocate all of the memory up front and leak
             let bytes: &'static mut [u8] = vec![0u8; num_frames * PAGE_SIZE].leak();
-            println!(
-                "Size of leaked buffers: {:#010X}",
-                std::mem::size_of_val(bytes)
-            );
-            debug_assert_eq!(bytes.len(), num_frames * PAGE_SIZE);
 
-            // Note: use `as_chunks_unchecked_mut()` when it is stabilized
+            // Note: use `as_chunks_unchecked_mut()` when it is stabilized:
             // https://doc.rust-lang.org/std/primitive.slice.html#method.as_chunks_unchecked_mut
             let slices: Vec<&'static mut [u8]> = bytes.chunks_exact_mut(PAGE_SIZE).collect();
-            debug_assert_eq!(slices.len(), num_frames);
-
             let buffers: Vec<IoSlice<'static>> =
                 slices.into_iter().map(|buf| IoSlice::new(buf)).collect();
 
+            // Create owned versions of each buffer and place them into th
             for buf in buffers.iter().copied() {
                 let frame = Frame::new(buf);
                 tx.send_blocking(frame)
                     .expect("Was unable to send the initial frames onto the global free list");
             }
 
-            let io_slices: &'static [IoSlice] = buffers.leak();
-            assert_eq!(io_slices.len(), num_frames);
-            println!(
-                "Size of leaked vector of IoSlice: {:#010X}",
-                std::mem::size_of_val(io_slices)
-            );
-
-            io_slices
+            buffers.leak()
         };
 
         Self {
@@ -140,6 +127,7 @@ impl BufferPoolManager {
         })
     }
 
+    /// Cools a given page, evicting it if it is already cool.
     async fn cool(self: &Arc<Self>, pid: &PageId) {
         let page_handle = self
             .get_page(pid)
@@ -147,9 +135,7 @@ impl BufferPoolManager {
             .expect("Could not find an active page in the map of pages");
 
         match page_handle.page.eviction_state.load(Ordering::Acquire) {
-            TemperatureState::Cold => {
-                panic!("Found a Cold page in the active list of pages")
-            }
+            TemperatureState::Cold => panic!("Found a Cold page in the active list of pages"),
             TemperatureState::Cool => page_handle.evict().await,
             TemperatureState::Hot => page_handle
                 .page
@@ -158,6 +144,10 @@ impl BufferPoolManager {
         }
     }
 
+    /// Continuously runs the eviction algorithm in a loop.
+    ///
+    /// This `Future` should be placed onto the task queue of every worker so that it does not stall
+    /// waiting for other worker threads to manually release buffers.
     pub async fn evictor(self: &Arc<Self>) -> ! {
         let bpm = self.clone();
 
@@ -165,8 +155,8 @@ impl BufferPoolManager {
             // Pages referenced in the `active_pages` list are guaranteed to own `Frame`s
             let active_guard = bpm.active_pages.lock().await;
 
+            // Run all eviction futures concurrently
             let futures = active_guard.deref().iter().map(|pid| self.cool(pid));
-
             future::join_all(futures).await;
         }
     }
