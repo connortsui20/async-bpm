@@ -108,22 +108,22 @@ impl BufferPoolManager {
     ///
     /// If the page already exists, returns `None`.
     pub async fn create_page(self: &Arc<Self>, pid: PageId) -> Option<PageHandle> {
+        // First check if it exists already
         let mut pages_guard = self.pages.write().await;
-
         if pages_guard.contains_key(&pid) {
             return None;
         }
 
+        // Create the new page and update the global map of pages
         let page = Arc::new(Page {
             pid,
             eviction_state: Temperature::new(TemperatureState::Cold),
             inner: RwLock::new(None),
         });
-
         pages_guard.insert(pid, page.clone());
 
+        // Create the page handle and return
         let disk_manager_handle = self.disk_manager.create_handle();
-
         Some(PageHandle {
             page,
             bpm: self.clone(),
@@ -136,12 +136,12 @@ impl BufferPoolManager {
     ///
     /// If the page does not already exist, use `create_page` instead to get a `PageHandle`.
     pub async fn get_page(self: &Arc<Self>, pid: &PageId) -> Option<PageHandle> {
+        // First check if it doesn't exist yet
         let pages_guard = self.pages.read().await;
-
         let page = pages_guard.get(pid)?.clone();
 
+        // It does exist, so create the page handle and return
         let disk_manager_handle = self.disk_manager.create_handle();
-
         Some(PageHandle {
             page,
             bpm: self.clone(),
@@ -150,6 +150,11 @@ impl BufferPoolManager {
     }
 
     /// Cools a given page, evicting it if it is already cool.
+    ///
+    /// This function will "cool" any [`Hot`](TemperatureState::Hot) [`Page`] down to a
+    /// [`Cool`](TemperatureState::Cool) [`TemperatureState`], and it will evict any
+    /// [`Cool`](TemperatureState::Cool) [`Page`] completely out of memory, which will set the
+    /// [`TemperatureState`] down to [`Cold`](TemperatureState::Cold).
     async fn cool(self: &Arc<Self>, pid: &PageId) {
         let page_handle = self
             .get_page(pid)
