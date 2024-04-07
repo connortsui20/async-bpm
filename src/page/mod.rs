@@ -22,6 +22,7 @@ pub struct Page {
     pub(crate) inner: RwLock<Option<Frame>>, // TODO change to hybrid latch
 }
 
+/// A shared reference to a [`Page`].
 pub type PageRef = Arc<Page>;
 
 /// A unique identifier for a shared [`Page`].

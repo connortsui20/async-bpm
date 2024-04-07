@@ -15,6 +15,7 @@ use std::{
 };
 use thread_local::ThreadLocal;
 
+/// Manages reads into and writes from [`Frames`] between memory and disk.
 #[derive(Debug)]
 pub struct DiskManager {
     /// A slice of buffers, used solely to register into new [`IoUringAsync`] instances.
@@ -34,6 +35,7 @@ pub struct DiskManager {
 }
 
 impl DiskManager {
+    /// Creates a new shared [`DiskManager`] instance.
     pub fn new(capacity: usize, file_name: String, io_slices: Box<[IoSlice<'static>]>) -> Self {
         let file = OpenOptions::new()
             .create(true)
@@ -102,6 +104,7 @@ impl DiskManager {
     }
 }
 
+/// A thread-local handle to a [`DiskManager`] that contains an inner [`IoUringAsync`] instance.
 #[derive(Debug)]
 pub struct DiskManagerHandle {
     disk_manager: Arc<DiskManager>,
@@ -109,6 +112,7 @@ pub struct DiskManagerHandle {
 }
 
 impl DiskManagerHandle {
+    /// Reads a page's data into a [`Frame`] from disk.
     pub async fn read_into(&self, pid: PageId, mut frame: Frame) -> Result<Frame, Frame> {
         let fd = Fd(self.disk_manager.file.as_raw_fd());
 
@@ -131,6 +135,7 @@ impl DiskManagerHandle {
         }
     }
 
+    /// Writes a page's data on a [`Frame`] to disk.
     pub async fn write_from(&self, pid: PageId, frame: Frame) -> Result<Frame, Frame> {
         let fd = Fd(self.disk_manager.file.as_raw_fd());
 

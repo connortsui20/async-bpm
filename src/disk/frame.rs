@@ -6,9 +6,11 @@ use std::io::IoSliceMut;
 pub struct Frame {
     /// The buffer that this [`Frame`] holds ownership over.
     ///
-    /// Since [`Frame`] is not [`Clone`]able, this [`Frame`] is guaranteed to
-    /// have sole access to the inner [`IoSliceMut`].
+    /// Since [`Frame`] is not [`Clone`]able, this [`Frame`] is guaranteed to have sole access to
+    /// the inner [`IoSliceMut`].
     pub(crate) buf: IoSliceMut<'static>,
+
+    /// A reference to the page that owns this [`Frame`], if an owner actually exists
     pub(crate) owner: Option<PageRef>,
 }
 

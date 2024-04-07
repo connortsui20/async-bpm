@@ -46,7 +46,9 @@ impl IoUringAsync {
     ///
     /// This `Future` _must_ be placed onto the task queue of a thread _at least_ once, otherwise no
     /// `Op` futures will ever make progress.
-    pub async fn listener(uring: Self, async_fd: Rc<AsyncFd<IoUringAsync>>) -> ! {
+    pub async fn listener(self: &Rc<Self>) -> ! {
+        let async_fd = AsyncFd::new(self.clone()).unwrap();
+
         loop {
             let mut guard = async_fd.writable().await.unwrap();
 
@@ -66,7 +68,9 @@ impl IoUringAsync {
     /// Either this `Future` _must_ be placed onto the task queue of a thread _at least_ once, or
     /// the caller must ensure that they manually call [`IoUringAsync::submit`] at regular intervals
     /// otherwise no `Op` futures will ever make progress.
-    pub async fn submitter(uring: Self, async_fd: Rc<AsyncFd<IoUringAsync>>) -> ! {
+    pub async fn submitter(self: &Rc<Self>) -> ! {
+        let async_fd = AsyncFd::new(self.clone()).unwrap();
+
         loop {
             let mut guard = async_fd.writable().await.unwrap();
 
