@@ -13,7 +13,7 @@ pub struct Frame {
 }
 
 impl Frame {
-    /// Creates a new and owned [`Frame`] given a static [`IoSlice`].
+    /// Creates a new and owned [`Frame`] given a static [`IoSliceMut`].
     pub fn new(ioslice: IoSliceMut<'static>) -> Self {
         Self {
             buf: ioslice,
