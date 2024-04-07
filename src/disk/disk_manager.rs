@@ -15,7 +15,7 @@ use std::{
 };
 use thread_local::ThreadLocal;
 
-/// Manages reads into and writes from [`Frames`] between memory and disk.
+/// Manages reads into and writes from [`Frame`]s between memory and disk.
 #[derive(Debug)]
 pub struct DiskManager {
     /// A slice of buffers, used solely to register into new [`IoUringAsync`] instances.

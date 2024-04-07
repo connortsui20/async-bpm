@@ -105,8 +105,8 @@ impl PageHandle {
         todo!()
     }
 
-    /// Evicts the page's data, freeing the [`Frame`] that this [`Page`] owns, and making the
-    /// [`Frame`] available for other [`Page`]s to use.
+    /// Evicts the page's data, freeing the [`Frame`] that this [`Page`](super::Page) owns, and making the
+    /// [`Frame`] available for other [`Page`](super::Page)s to use.
     pub async fn evict(&self) {
         let mut guard = self.page.inner.write().await;
 
