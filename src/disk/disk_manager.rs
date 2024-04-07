@@ -21,7 +21,10 @@ pub struct DiskManager {
     ///
     /// Right now, this only supports a single group of buffers, but in the future it should be able
     /// to support multiple groups of buffers to support more shared memory for the buffer pool.
-    io_slices: &'static [IoSlice<'static>],
+    ///
+    /// For safety purposes, we cannot ever read from any of these slices, as we should only be
+    /// accessing the inner data through [`Frame`]s.
+    register_buffers: Box<[IoSlice<'static>]>,
 
     /// Thread-local `IoUringAsync` instances.
     io_urings: ThreadLocal<SendWrapper<IoUringAsync>>,
@@ -31,11 +34,7 @@ pub struct DiskManager {
 }
 
 impl DiskManager {
-    pub fn new(
-        num_initial_pages: usize,
-        file_name: String,
-        io_slices: &'static [IoSlice<'static>],
-    ) -> Self {
+    pub fn new(capacity: usize, file_name: String, io_slices: Box<[IoSlice<'static>]>) -> Self {
         let file = OpenOptions::new()
             .create(true)
             .read(true)
@@ -44,12 +43,12 @@ impl DiskManager {
             .open(&file_name)
             .unwrap_or_else(|e| panic!("Failed to open file {file_name}, with error: {e}"));
 
-        let file_size = num_initial_pages * PAGE_SIZE;
+        let file_size = capacity * PAGE_SIZE;
         file.set_len(file_size as u64)
             .expect("Was unable to change the length of {file_name} to {file_size}");
 
         Self {
-            io_slices,
+            register_buffers: io_slices,
             io_urings: ThreadLocal::new(),
             file,
         }
@@ -80,12 +79,12 @@ impl DiskManager {
 
         // Now register the buffers as shared between the user and the kernel
         {
-            let ptr = self.io_slices.as_ptr() as *const iovec;
+            let ptr = self.register_buffers.as_ptr() as *const iovec;
 
             // Safety: Since the pointer came from a valid slice, and since `IoSliceMut` is ABI
             // compatible with `iovec`, this is safe.
             let raw_buffers: &'static [iovec] =
-                unsafe { std::slice::from_raw_parts(ptr, self.io_slices.len()) };
+                unsafe { std::slice::from_raw_parts(ptr, self.register_buffers.len()) };
 
             let raw_uring = uring.uring.borrow_mut();
 

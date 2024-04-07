@@ -42,53 +42,60 @@ pub struct BufferPoolManager {
 
 impl BufferPoolManager {
     /// Constructs a new buffer pool manager with the given number of `PAGE_SIZE`ed buffer frames.
-    pub fn new(num_initial_pages: usize, num_frames: usize) -> Self {
+    ///
+    /// The argument `capacity` should be the starting number of logical pages the user of the
+    /// [`BufferPoolManager`] wishes to use, as it will allocate enough space on disk to initially
+    /// accommodate that number.
+    pub fn new(num_frames: usize, capacity: usize) -> Self {
         // All frames start out as free
         let (tx, rx) = async_channel::bounded(num_frames);
 
-        // Allocate all buffer memory up front and leak it so it never gets dropped
-        let io_slices: &'static [IoSlice<'static>] = {
-            let bytes: &'static mut [u8] = vec![0u8; num_frames * PAGE_SIZE].leak();
+        // Allocate all of the buffer memory up front
+        let bytes: &'static mut [u8] = vec![0u8; num_frames * PAGE_SIZE].leak();
 
-            // Note: use `as_chunks_unchecked_mut()` when it is stabilized:
-            // https://doc.rust-lang.org/std/primitive.slice.html#method.as_chunks_unchecked_mut
-            let slices: Vec<&'static mut [u8]> = bytes.chunks_exact_mut(PAGE_SIZE).collect();
+        // Note: should use `as_chunks_unchecked_mut()` instead once it is stabilized:
+        // https://doc.rust-lang.org/std/primitive.slice.html#method.as_chunks_unchecked_mut
+        let slices: Vec<&'static mut [u8]> = bytes.chunks_exact_mut(PAGE_SIZE).collect();
+        assert_eq!(slices.len(), num_frames);
 
-            // TODO docs
-            let mut register_buffers = Vec::with_capacity(slices.len());
-            let mut owned_buffers = Vec::with_capacity(slices.len());
+        // Create the registerable buffers, as well as create the owned `Frame`s and send them down
+        // the channel for future `Page`s to take ownership of
+        let register_buffers = slices
+            .into_iter()
+            .map(|buf| {
+                // Safety: Since we never actually read from the buffer pointers (intended for being
+                // registered in an `io_uring` instance), it is safe to have a shared slice
+                // reference exist at the same time as the exclusive mutable slice reference that is
+                // being stored through the `IoSliceMut` and `Frame`.
+                let register_slice = unsafe { slice::from_raw_parts(buf.as_ptr(), PAGE_SIZE) };
 
-            // TODO docs
-            for buf in slices {
-                // TODO SAFETY
-                let register_buf = unsafe { slice::from_raw_parts(buf.as_ptr(), PAGE_SIZE) };
-                let io_slice = IoSlice::new(register_buf);
+                {
+                    // Create the owned `Frame`
+                    let owned_buf = IoSliceMut::new(buf);
+                    let frame = Frame::new(owned_buf);
 
-                let io_slice_mut = IoSliceMut::new(buf);
+                    // Add the `Frame` to the channel of free frames
+                    tx.send_blocking(frame)
+                        .expect("Was unable to send the initial frames onto the global free list");
+                }
 
-                register_buffers.push(io_slice);
-                owned_buffers.push(io_slice_mut);
-            }
+                IoSlice::new(register_slice)
+            })
+            .collect::<Vec<IoSlice<'static>>>()
+            .into_boxed_slice();
 
-            for owned_buf in owned_buffers {
-                let frame = Frame::new(owned_buf);
-                tx.send_blocking(frame)
-                    .expect("Was unable to send the initial frames onto the global free list");
-            }
-
-            register_buffers.leak()
-        };
+        let disk_manager = Arc::new(DiskManager::new(
+            capacity,
+            "db.test".to_string(),
+            register_buffers,
+        ));
 
         Self {
             num_frames,
-            active_pages: Mutex::new(HashSet::with_capacity(num_frames)),
             pages: RwLock::new(HashMap::with_capacity(num_frames)),
+            active_pages: Mutex::new(HashSet::with_capacity(num_frames)),
             free_frames: (tx, rx),
-            disk_manager: Arc::new(DiskManager::new(
-                num_initial_pages,
-                "db.test".to_string(),
-                io_slices,
-            )),
+            disk_manager,
         }
     }
 
