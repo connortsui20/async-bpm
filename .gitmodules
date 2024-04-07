@@ -1,3 +1,0 @@
-[submodule "io-uring"]
-	path = io-uring
-	url = git@github.com:tokio-rs/io-uring.git
