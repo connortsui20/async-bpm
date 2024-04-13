@@ -57,32 +57,14 @@ impl IoUringAsync {
         }
     }
 
-    /// Continuously submits entries on the submission queue.
+    /// Submit all queued submission queue events to the kernel.
     ///
     /// Note that submission is not the same thing as pushing an operation onto the `io_uring`
     /// submission queue. Use [`IoUringAsync::push`] to place operations onto the submission queue,
     /// and use [`IoUringAsync::submit`] to manually submit said operations to the kernel.
     ///
-    /// Will panic if submission fails.
-    ///
-    /// Either this `Future` _must_ be placed onto the task queue of a thread _at least_ once, or
-    /// the caller must ensure that they manually call [`IoUringAsync::submit`] at regular intervals
-    /// otherwise no `Op` futures will ever make progress.
-    pub async fn submitter(self: &Rc<Self>) -> ! {
-        let async_fd = AsyncFd::new(self.clone()).unwrap();
-
-        loop {
-            let mut guard = async_fd.writable().await.unwrap();
-
-            guard.get_inner().submit().expect(
-                "Something went wrong when trying to submit \
-                `io_uring` operation events on the submission queue",
-            );
-            guard.clear_ready();
-        }
-    }
-
-    /// Submit all queued submission queue events to the kernel.
+    /// Ideally, this function should be called on the [`IoUringAsync`] instance every time a worker
+    /// thread parks. For example, call `submit` from [`tokio::runtime::Builder::on_thread_park`].
     pub fn submit(&self) -> std::io::Result<usize> {
         self.uring.borrow().submit()
     }
@@ -120,7 +102,7 @@ impl IoUringAsync {
         // duration of the operation, and this is guaranteed by this function's safety contract.
         while unsafe { submission_queue.push(&entry).is_err() } {
             // Help make progress
-            self.submit().unwrap();
+            submission_queue.sync();
         }
 
         Op {
