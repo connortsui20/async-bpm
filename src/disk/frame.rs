@@ -1,5 +1,8 @@
 use crate::page::PageRef;
-use std::io::IoSliceMut;
+use std::{
+    io::IoSliceMut,
+    ops::{Deref, DerefMut},
+};
 
 /// An owned buffer frame, intended to be shared between user and kernel space.
 #[derive(Debug)]
@@ -21,5 +24,19 @@ impl Frame {
             buf: ioslice,
             owner: None,
         }
+    }
+}
+
+impl Deref for Frame {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        self.buf.deref()
+    }
+}
+
+impl DerefMut for Frame {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.buf.deref_mut()
     }
 }
