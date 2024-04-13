@@ -156,4 +156,9 @@ impl DiskManagerHandle {
             Err(frame)
         }
     }
+
+    // Retrieves the thread-local `io_uring` instance.
+    pub fn get_uring(&self) -> IoUringAsync {
+        self.uring.clone()
+    }
 }
