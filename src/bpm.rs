@@ -1,5 +1,8 @@
 use crate::{
-    disk::{disk_manager::DiskManager, frame::Frame},
+    disk::{
+        disk_manager::{DiskManager, DiskManagerHandle},
+        frame::Frame,
+    },
     page::{
         eviction::{Temperature, TemperatureState},
         Page, PageHandle, PageId, PageRef, PAGE_SIZE,
@@ -147,6 +150,11 @@ impl BufferPoolManager {
             bpm: self.clone(),
             dm: disk_manager_handle,
         })
+    }
+
+    // Creates a thread-local [`DiskManagerHandle`] to the inner [`DiskManager`].
+    pub fn get_disk_manager(&self) -> DiskManagerHandle {
+        self.disk_manager.create_handle()
     }
 
     /// Cools a given page, evicting it if it is already cool.
