@@ -33,25 +33,17 @@ impl PageId {
     }
 
     pub fn fd(&self) -> u32 {
-        todo!()
+        todo!("Which file descriptor (which physical disk) does this belong to?")
     }
 
     pub fn offset(&self) -> u64 {
-        self.inner * PAGE_SIZE as u64
-    }
-
-    pub fn buf_group(&self) -> u16 {
-        todo!()
-    }
-
-    pub fn buf_index(&self) -> u16 {
-        todo!()
+        self.as_u64() * PAGE_SIZE as u64
     }
 }
 
 /// We must always be able to convert a `PageId` into a unique 64-bit integer.
 impl From<PageId> for u64 {
     fn from(value: PageId) -> Self {
-        value.inner
+        value.as_u64()
     }
 }
