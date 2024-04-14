@@ -11,6 +11,7 @@ use tokio::{runtime::Builder, task::LocalSet};
 fn test_new_disk_manager() {
     let bpm = Arc::new(BufferPoolManager::new(4, 4));
     let dmh = bpm.get_disk_manager();
+    let uring = Rc::new(dmh.get_uring());
 
     let pid0 = PageId::new(0);
     let pid1 = PageId::new(1);
@@ -21,13 +22,6 @@ fn test_new_disk_manager() {
     let mut frame = Frame::new(io_slice);
 
     let local = LocalSet::new();
-
-    let uring = Rc::new(dmh.get_uring());
-
-    // This daemon continuously polls and submits for the `io_uring` instance.
-    let uring_daemon = uring.clone();
-    local.spawn_local(async move { uring_daemon.listener().await });
-
     local.spawn_local(async move {
         frame.deref_mut().fill(b'C');
         let mut frame = dmh.write_from(pid0, frame).await.unwrap();
@@ -39,11 +33,12 @@ fn test_new_disk_manager() {
         let _frame = dmh.write_from(pid2, frame).await.unwrap();
     });
 
-    let uring_submitter = SendWrapper::new(uring.clone());
+    let uring_daemon = SendWrapper::new(uring.clone());
     let rt = Arc::new(
         Builder::new_current_thread()
             .on_thread_park(move || {
-                uring_submitter.submit().unwrap();
+                uring_daemon.submit().unwrap();
+                uring_daemon.poll();
             })
             .enable_all()
             .build()

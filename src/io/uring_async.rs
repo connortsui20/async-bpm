@@ -44,8 +44,10 @@ impl IoUringAsync {
 
     /// Continuously polls the completion queue and updates any local in-flight operation states.
     ///
-    /// This `Future` _must_ be placed onto the task queue of a thread _at least_ once, otherwise no
-    /// `Op` futures will ever make progress.
+    /// Either this `Future` _must_ be placed onto the task queue of a thread _at least_ once,
+    /// otherwise no [`Op`] futures will ever make progress, or the runtime must be set up to
+    /// continuously poll the [`IoUringAsync`] instance, for example in
+    /// [`tokio::runtime::Builder::on_thread_park`].
     pub async fn listener(self: &Rc<Self>) -> ! {
         let async_fd = AsyncFd::new(self.clone()).unwrap();
 
@@ -55,18 +57,6 @@ impl IoUringAsync {
             guard.get_inner().poll();
             guard.clear_ready();
         }
-    }
-
-    /// Submit all queued submission queue events to the kernel.
-    ///
-    /// Note that submission is not the same thing as pushing an operation onto the `io_uring`
-    /// submission queue. Use [`IoUringAsync::push`] to place operations onto the submission queue,
-    /// and use [`IoUringAsync::submit`] to manually submit said operations to the kernel.
-    ///
-    /// Ideally, this function should be called on the [`IoUringAsync`] instance every time a worker
-    /// thread parks. For example, call `submit` from [`tokio::runtime::Builder::on_thread_park`].
-    pub fn submit(&self) -> std::io::Result<usize> {
-        self.uring.borrow().submit()
     }
 
     /// Pushes an entry onto the submission queue.
@@ -111,6 +101,18 @@ impl IoUringAsync {
                 id,
             }),
         }
+    }
+
+    /// Submit all queued submission queue events to the kernel.
+    ///
+    /// Note that submission is not the same thing as pushing an operation onto the `io_uring`
+    /// submission queue. Use [`IoUringAsync::push`] to place operations onto the submission queue,
+    /// and use [`IoUringAsync::submit`] to manually submit said operations to the kernel.
+    ///
+    /// Ideally, this function should be called on the [`IoUringAsync`] instance every time a worker
+    /// thread parks. For example, call `submit` from [`tokio::runtime::Builder::on_thread_park`].
+    pub fn submit(&self) -> std::io::Result<usize> {
+        self.uring.borrow().submit()
     }
 
     /// Poll the `io_uring` completion queue for completed events.
