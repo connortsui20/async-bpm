@@ -29,7 +29,7 @@ impl PageId {
     }
 
     pub fn as_u64(self) -> u64 {
-        Into::<u64>::into(self)
+        self.inner
     }
 
     pub fn fd(&self) -> u32 {
