@@ -101,6 +101,9 @@ impl PageHandle {
         self.page
             .eviction_state
             .store(TemperatureState::Hot, Ordering::Release);
+
+        let old = guard.replace(frame);
+        assert!(old.is_none());
     }
 
     /// Evicts the page's data, freeing the [`Frame`] that this [`Page`](super::Page) owns, and
@@ -121,7 +124,8 @@ impl PageHandle {
             "Removed an active page that was somehow not in the active pages set"
         );
 
-        let frame = guard.take().unwrap();
+        let mut frame = guard.take().unwrap();
+        frame.owner = None;
 
         // Write the data out to disk
         let frame = self
