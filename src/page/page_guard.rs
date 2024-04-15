@@ -1,6 +1,6 @@
 //! Wrappers around `tokio`'s `RwLockReadGuard` and `RwLockWriteGuard`, dedicated for pages of data.
 
-use crate::disk::frame::Frame;
+use crate::disk::{disk_manager::DiskManagerHandle, frame::Frame};
 use std::ops::{Deref, DerefMut};
 use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
 
@@ -48,18 +48,42 @@ impl<'a> Deref for ReadPageGuard<'a> {
 #[derive(Debug)]
 pub struct WritePageGuard<'a> {
     guard: RwLockWriteGuard<'a, Option<Frame>>,
+    dm: DiskManagerHandle,
 }
 
-// TODO implement `flush` for `WritePageGuard`
-
 impl<'a> WritePageGuard<'a> {
-    pub(crate) fn new(guard: RwLockWriteGuard<'a, Option<Frame>>) -> Self {
+    pub(crate) fn new(guard: RwLockWriteGuard<'a, Option<Frame>>, dm: DiskManagerHandle) -> Self {
         assert!(
             guard.deref().is_some(),
             "Cannot create a WritePageGuard that does not own a Frame"
         );
 
-        Self { guard }
+        Self { guard, dm }
+    }
+
+    pub async fn flush(&mut self) {
+        if self.guard.is_none() {
+            // There is nothing for us to flush
+            return;
+        }
+
+        let frame = self.guard.take().unwrap();
+
+        let pid = frame
+            .owner
+            .as_ref()
+            .expect("WritePageGuard protects a Frame that does not have an Page Owner")
+            .pid;
+
+        // Write the data out to disk
+        let frame = self
+            .dm
+            .write_from(pid, frame)
+            .await
+            .unwrap_or_else(|_| panic!("Was unable to write data from page {:?} to disk", pid));
+
+        let res = self.guard.replace(frame);
+        assert!(res.is_none());
     }
 }
 

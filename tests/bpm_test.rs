@@ -43,9 +43,7 @@ fn test_new_disk_manager() {
                     let mut guard = ph.write().await;
                     guard.deref_mut().fill(b' ' + i as u8);
 
-                    drop(guard);
-
-                    ph.evict().await;
+                    guard.flush().await;
                 });
 
                 rt.block_on(local);

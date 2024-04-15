@@ -51,13 +51,13 @@ impl PageHandle {
 
         // If it is already loaded, then we're done
         if write_guard.deref().is_some() {
-            return WritePageGuard::new(write_guard);
+            return WritePageGuard::new(write_guard, self.dm.clone());
         }
 
         // Otherwise we need to load the page into memory
         self.load(&mut write_guard).await;
 
-        WritePageGuard::new(write_guard)
+        WritePageGuard::new(write_guard, self.dm.clone())
     }
 
     /// Loads page data from disk into a frame in memory.

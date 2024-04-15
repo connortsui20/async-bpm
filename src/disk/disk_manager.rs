@@ -105,7 +105,7 @@ impl DiskManager {
 }
 
 /// A thread-local handle to a [`DiskManager`] that contains an inner [`IoUringAsync`] instance.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DiskManagerHandle {
     disk_manager: Arc<DiskManager>,
     uring: IoUringAsync,
