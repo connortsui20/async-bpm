@@ -29,7 +29,7 @@ impl<'a> ReadPageGuard<'a> {
 }
 
 impl<'a> Deref for ReadPageGuard<'a> {
-    type Target = Frame;
+    type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
         self.guard
@@ -62,7 +62,7 @@ impl<'a> WritePageGuard<'a> {
 }
 
 impl<'a> Deref for WritePageGuard<'a> {
-    type Target = Frame;
+    type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
         self.guard

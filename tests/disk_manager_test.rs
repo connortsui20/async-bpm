@@ -37,7 +37,7 @@ fn test_new_disk_manager() {
     let rt = Arc::new(
         Builder::new_current_thread()
             .on_thread_park(move || {
-                uring_daemon.submit().unwrap();
+                uring_daemon.submit().expect("Was unable to submit `io_uring` operations");
                 uring_daemon.poll();
             })
             .enable_all()
