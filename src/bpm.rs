@@ -110,20 +110,20 @@ impl BufferPoolManager {
     /// Creates a logical page in the buffer pool manager, returning `PageHandle` to the page.
     ///
     /// If the page already exists, returns `None`.
-    pub async fn create_page(self: &Arc<Self>, pid: PageId) -> Option<PageHandle> {
+    pub async fn create_page(self: &Arc<Self>, pid: &PageId) -> Option<PageHandle> {
         // First check if it exists already
         let mut pages_guard = self.pages.write().await;
-        if pages_guard.contains_key(&pid) {
+        if pages_guard.contains_key(pid) {
             return None;
         }
 
         // Create the new page and update the global map of pages
         let page = Arc::new(Page {
-            pid,
+            pid: *pid,
             eviction_state: Temperature::new(TemperatureState::Cold),
             inner: RwLock::new(None),
         });
-        pages_guard.insert(pid, page.clone());
+        pages_guard.insert(*pid, page.clone());
 
         // Create the page handle and return
         let disk_manager_handle = self.disk_manager.create_handle();
