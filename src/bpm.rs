@@ -125,6 +125,8 @@ impl BufferPoolManager {
         });
         pages_guard.insert(*pid, page.clone());
 
+        drop(pages_guard);
+
         // Create the page handle and return
         let disk_manager_handle = self.disk_manager.create_handle();
         Some(PageHandle {
@@ -142,6 +144,8 @@ impl BufferPoolManager {
         // First check if it doesn't exist yet
         let pages_guard = self.pages.read().await;
         let page = pages_guard.get(pid)?.clone();
+
+        drop(pages_guard);
 
         // It does exist, so create the page handle and return
         let disk_manager_handle = self.disk_manager.create_handle();
@@ -190,9 +194,12 @@ impl BufferPoolManager {
             // Pages referenced in the `active_pages` list are guaranteed to own `Frame`s
             let active_guard = bpm.active_pages.lock().await;
 
+            let pids: Vec<_> = active_guard.deref().iter().copied().collect();
+
+            drop(active_guard);
+
             // Run all eviction futures concurrently
-            let futures = active_guard.deref().iter().map(|pid| self.cool(pid));
-            future::join_all(futures).await;
+            future::join_all(pids.iter().map(|pid| self.cool(pid))).await;
         }
     }
 }
