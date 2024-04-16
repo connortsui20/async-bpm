@@ -94,8 +94,10 @@ impl PageHandle {
         frame.owner.replace(self.page.clone());
 
         // Add to the set of active pages
-        let mut active_guard = self.bpm.active_pages.lock().await;
-        active_guard.insert(self.page.pid);
+        {
+            let mut active_guard = self.bpm.active_pages.lock().await;
+            active_guard.insert(self.page.pid);
+        }
 
         // Update the eviction state
         self.page
@@ -117,18 +119,21 @@ impl PageHandle {
         }
 
         // Remove from the set of active pages
-        let mut active_guard = self.bpm.active_pages.lock().await;
-        let remove_res = active_guard.remove(&self.page.pid);
-        assert!(
-            remove_res,
-            "Removed an active page that was somehow not in the active pages set"
-        );
+        {
+            let mut active_guard = self.bpm.active_pages.lock().await;
+            let remove_res = active_guard.remove(&self.page.pid);
+            assert!(
+                remove_res,
+                "Removed an active page that was somehow not in the active pages set"
+            );
+        }
 
-        let mut frame = guard.take().unwrap();
-        frame.owner = None;
+        let frame = guard.take().unwrap();
+
+        drop(guard);
 
         // Write the data out to disk
-        let frame = self
+        let mut frame = self
             .dm
             .write_from(self.page.pid, frame)
             .await
@@ -139,10 +144,7 @@ impl PageHandle {
                 )
             });
 
-        // Update the eviction state
-        self.page
-            .eviction_state
-            .store(TemperatureState::Cold, Ordering::Release);
+        frame.owner = None;
 
         // Free the frame
         self.bpm
@@ -151,5 +153,10 @@ impl PageHandle {
             .send(frame)
             .await
             .expect("Free frames channel was unexpectedly closed");
+
+        // Update the eviction state
+        self.page
+            .eviction_state
+            .store(TemperatureState::Cold, Ordering::Release);
     }
 }
