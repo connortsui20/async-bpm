@@ -11,6 +11,34 @@ fn test_new_disk_manager() {
     let bpm = Arc::new(BufferPoolManager::new(4, THREADS));
 
     thread::scope(|s| {
+        // Spawn the eviction thread / single task
+        s.spawn(|| {
+            let bpm_clone = bpm.clone();
+            let dmh = bpm_clone.get_disk_manager();
+            let uring = Rc::new(dmh.get_uring());
+
+            let uring_daemon = SendWrapper::new(uring.clone());
+            let rt = Arc::new(
+                Builder::new_current_thread()
+                    .on_thread_park(move || {
+                        uring_daemon
+                            .submit()
+                            .expect("Was unable to submit `io_uring` operations");
+                        uring_daemon.poll();
+                    })
+                    .enable_all()
+                    .build()
+                    .unwrap(),
+            );
+
+            let local = LocalSet::new();
+            local.spawn_local(async move {
+                bpm_clone.evictor().await;
+            });
+
+            rt.block_on(local);
+        });
+
         for i in 0..THREADS {
             let bpm_clone = bpm.clone();
 
@@ -34,22 +62,33 @@ fn test_new_disk_manager() {
 
                 let local = LocalSet::new();
                 local.spawn_local(async move {
+                    // TODO this deadlocks
+                    // let bpm_evictor = bpm_clone.clone();
+                    // tokio::task::spawn_local(async move { bpm_evictor.evictor().await });
+
                     let pid = PageId::new(i as u64);
                     let ph = match bpm_clone.create_page(&pid).await {
                         None => bpm_clone.get_page(&pid).await.unwrap(),
                         Some(ph) => ph,
                     };
 
+                    println!("Starting to write page {:?}", pid);
                     let mut guard = ph.write().await;
+
                     guard.deref_mut().fill(b' ' + i as u8);
 
-                    guard.flush().await;
+                    drop(guard);
+
+                    println!("Dropping page guard {:?}", pid);
+
+                    loop {
+                        tokio::task::yield_now().await;
+                    }
                 });
 
                 rt.block_on(local);
-
-                loop {}
             });
         }
+        // run eviction thread
     });
 }
