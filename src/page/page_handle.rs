@@ -19,6 +19,10 @@ pub struct PageHandle {
 }
 
 impl PageHandle {
+    pub(crate) fn new(page: PageRef, bpm: Arc<BufferPoolManager>, dm: DiskManagerHandle) -> Self {
+        Self { page, bpm, dm }
+    }
+
     /// Gets a read guard on a logical page, which guarantees the data is in memory.
     pub async fn read(&self) -> ReadPageGuard {
         self.page

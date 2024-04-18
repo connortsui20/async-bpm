@@ -107,14 +107,19 @@ impl BufferPoolManager {
         self.num_frames
     }
 
-    /// Creates a logical page in the buffer pool manager, returning `PageHandle` to the page.
+    /// Creates a thread-local page handle of the buffer pool manager, returning a `PageHandle` to
+    /// the logical page data.
     ///
-    /// If the page already exists, returns `None`.
-    async fn create_page(self: &Arc<Self>, pid: &PageId) -> Option<PageHandle> {
+    /// If the page already exists, this function will return that instead.
+    async fn create_page(self: &Arc<Self>, pid: &PageId) -> PageHandle {
         // First check if it exists already
         let mut pages_guard = self.pages.write().await;
-        if pages_guard.contains_key(pid) {
-            return None;
+        if let Some(page) = pages_guard.get(pid) {
+            return PageHandle::new(
+                page.clone(),
+                self.clone(),
+                self.disk_manager.create_handle(),
+            );
         }
 
         // Create the new page and update the global map of pages
@@ -123,41 +128,30 @@ impl BufferPoolManager {
             eviction_state: Temperature::new(TemperatureState::Cold),
             inner: RwLock::new(None),
         });
+
         pages_guard.insert(*pid, page.clone());
 
-        drop(pages_guard);
-
         // Create the page handle and return
-        let disk_manager_handle = self.disk_manager.create_handle();
-        Some(PageHandle {
-            page,
-            bpm: self.clone(),
-            dm: disk_manager_handle,
-        })
+        PageHandle::new(page, self.clone(), self.disk_manager.create_handle())
     }
 
-    /// Constructs a thread-local handle to a logical page, as long as the page already exists.
-    /// If it does not exist in the context of the buffer pool manager, returns `None`.
+    /// Gets a thread-local page handle of the buffer pool manager, returning a `PageHandle` to
+    /// the logical page data.
     ///
-    /// If the page does not already exist, use `create_page` instead to get a `PageHandle`.
-    pub async fn get_page(self: &Arc<Self>, pid: &PageId) -> Option<PageHandle> {
+    /// If the page does not already exist, this function will create it and then return it.
+    pub async fn get_page(self: &Arc<Self>, pid: &PageId) -> PageHandle {
         let pages_guard = self.pages.read().await;
 
-        match pages_guard.get(pid) {
+        // Get the page if it exists, otherwise create it and return
+        let page = match pages_guard.get(pid) {
+            Some(page) => page.clone(),
             None => {
                 drop(pages_guard);
-                self.create_page(pid).await
+                return self.create_page(pid).await;
             }
-            Some(page) => {
-                // It does exist, so create the page handle and return
-                let disk_manager_handle = self.disk_manager.create_handle();
-                Some(PageHandle {
-                    page: page.clone(),
-                    bpm: self.clone(),
-                    dm: disk_manager_handle,
-                })
-            }
-        }
+        };
+
+        PageHandle::new(page, self.clone(), self.disk_manager.create_handle())
     }
 
     // Creates a thread-local [`DiskManagerHandle`] to the inner [`DiskManager`].
@@ -172,10 +166,7 @@ impl BufferPoolManager {
     /// [`Cool`](TemperatureState::Cool) [`Page`] completely out of memory, which will set the
     /// [`TemperatureState`] down to [`Cold`](TemperatureState::Cold).
     async fn cool(self: &Arc<Self>, pid: &PageId) {
-        let page_handle = self
-            .get_page(pid)
-            .await
-            .expect("Could not find an active page in the map of pages");
+        let page_handle = self.get_page(pid).await;
 
         match page_handle.page.eviction_state.load(Ordering::Acquire) {
             TemperatureState::Cold => panic!("Found a Cold page in the active list of pages"),
