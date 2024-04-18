@@ -1,4 +1,4 @@
-#![cfg(target_os = "linux")]
+#![cfg(target_family = "unix")]
 
 pub mod bpm;
 pub mod disk;
