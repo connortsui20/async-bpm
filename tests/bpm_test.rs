@@ -63,24 +63,17 @@ fn test_bpm_threads() {
 
                 let local = LocalSet::new();
                 local.spawn_local(async move {
-                    // TODO this deadlocks
-                    // let bpm_evictor = bpm_clone.clone();
-                    // tokio::task::spawn_local(async move { bpm_evictor.evictor().await });
-
                     let pid = PageId::new(i as u64);
                     let ph = match bpm_clone.create_page(&pid).await {
                         None => bpm_clone.get_page(&pid).await.unwrap(),
                         Some(ph) => ph,
                     };
 
-                    println!("Starting to write page {:?}", pid);
                     let mut guard = ph.write().await;
 
                     guard.deref_mut().fill(b' ' + i as u8);
 
                     drop(guard);
-
-                    println!("Dropping page guard {:?}", pid);
 
                     loop {
                         tokio::task::yield_now().await;
