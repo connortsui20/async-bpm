@@ -45,8 +45,8 @@ impl<'a> Deref for ReadPageGuard<'a> {
 /// access the page's data while a task has this guard.
 #[derive(Debug)]
 pub struct WritePageGuard<'a> {
-    guard: RwLockWriteGuard<'a, Option<Frame>>,
-    dm: DiskManagerHandle,
+    pub(crate) guard: RwLockWriteGuard<'a, Option<Frame>>,
+    pub(crate) dm: DiskManagerHandle,
 }
 
 impl<'a> WritePageGuard<'a> {

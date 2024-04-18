@@ -111,12 +111,9 @@ impl PageHandle {
     /// Evicts the page's data, freeing the [`Frame`] that this [`Page`](super::Page) owns, and
     /// making the [`Frame`] available for other [`Page`](super::Page)s to use.
     pub async fn evict(&self) {
-        let mut guard = self.page.inner.write().await;
+        let mut guard = self.write().await;
 
-        if guard.deref().is_none() {
-            // There is nothing for us to evict
-            return;
-        }
+        guard.flush().await;
 
         // Remove from the set of active pages
         {
@@ -128,35 +125,25 @@ impl PageHandle {
             );
         }
 
-        let frame = guard.take().unwrap();
+        let mut frame = guard
+            .guard
+            .take()
+            .expect("WritePageGuard somehow did not have a Frame");
+        frame.owner = None;
+
+        // Update the eviction state
+        self.page
+            .eviction_state
+            .store(TemperatureState::Cold, Ordering::Release);
 
         drop(guard);
 
-        // Write the data out to disk
-        let mut frame = self
-            .dm
-            .write_from(self.page.pid, frame)
-            .await
-            .unwrap_or_else(|_| {
-                panic!(
-                    "Was unable to write data from page {:?} to disk",
-                    self.page.pid
-                )
-            });
-
-        frame.owner = None;
-
-        // Free the frame
+        // Make the Frame available to other pages
         self.bpm
             .free_frames
             .0
             .send(frame)
             .await
             .expect("Free frames channel was unexpectedly closed");
-
-        // Update the eviction state
-        self.page
-            .eviction_state
-            .store(TemperatureState::Cold, Ordering::Release);
     }
 }
