@@ -64,10 +64,7 @@ fn test_bpm_threads() {
                 let local = LocalSet::new();
                 local.spawn_local(async move {
                     let pid = PageId::new(i as u64);
-                    let ph = match bpm_clone.create_page(&pid).await {
-                        None => bpm_clone.get_page(&pid).await.unwrap(),
-                        Some(ph) => ph,
-                    };
+                    let ph = bpm_clone.get_page(&pid).await.unwrap();
 
                     let mut guard = ph.write().await;
 
