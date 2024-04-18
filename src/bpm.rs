@@ -110,7 +110,7 @@ impl BufferPoolManager {
     /// Creates a logical page in the buffer pool manager, returning `PageHandle` to the page.
     ///
     /// If the page already exists, returns `None`.
-    pub async fn create_page(self: &Arc<Self>, pid: &PageId) -> Option<PageHandle> {
+    async fn create_page(self: &Arc<Self>, pid: &PageId) -> Option<PageHandle> {
         // First check if it exists already
         let mut pages_guard = self.pages.write().await;
         if pages_guard.contains_key(pid) {
@@ -141,19 +141,23 @@ impl BufferPoolManager {
     ///
     /// If the page does not already exist, use `create_page` instead to get a `PageHandle`.
     pub async fn get_page(self: &Arc<Self>, pid: &PageId) -> Option<PageHandle> {
-        // First check if it doesn't exist yet
         let pages_guard = self.pages.read().await;
-        let page = pages_guard.get(pid)?.clone();
 
-        drop(pages_guard);
-
-        // It does exist, so create the page handle and return
-        let disk_manager_handle = self.disk_manager.create_handle();
-        Some(PageHandle {
-            page,
-            bpm: self.clone(),
-            dm: disk_manager_handle,
-        })
+        match pages_guard.get(pid) {
+            None => {
+                drop(pages_guard);
+                self.create_page(pid).await
+            }
+            Some(page) => {
+                // It does exist, so create the page handle and return
+                let disk_manager_handle = self.disk_manager.create_handle();
+                Some(PageHandle {
+                    page: page.clone(),
+                    bpm: self.clone(),
+                    dm: disk_manager_handle,
+                })
+            }
+        }
     }
 
     // Creates a thread-local [`DiskManagerHandle`] to the inner [`DiskManager`].
