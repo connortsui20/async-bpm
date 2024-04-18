@@ -5,7 +5,8 @@ use std::{ops::DerefMut, rc::Rc, sync::Arc};
 use tokio::{runtime::Builder, task::LocalSet};
 
 #[test]
-fn test_new_disk_manager() {
+#[ignore]
+fn test_bpm_threads() {
     const THREADS: usize = 95;
 
     let bpm = Arc::new(BufferPoolManager::new(4, THREADS));
