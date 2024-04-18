@@ -45,7 +45,7 @@ impl IoUringAsync {
     /// Continuously polls the completion queue and updates any local in-flight operation states.
     ///
     /// Either this `Future` _must_ be placed onto the task queue of a thread _at least_ once,
-    /// otherwise no [`Op`] futures will ever make progress, or the runtime must be set up to
+    /// otherwise no `Op` futures will ever make progress, or the runtime must be set up to
     /// continuously poll the [`IoUringAsync`] instance, for example in
     /// [`tokio::runtime::Builder::on_thread_park`].
     pub async fn listener(self: &Rc<Self>) -> ! {

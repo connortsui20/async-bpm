@@ -111,8 +111,6 @@ pub struct DiskManagerHandle {
     uring: IoUringAsync,
 }
 
-// TODO make these use ReadFixed and WriteFixed
-
 impl DiskManagerHandle {
     /// Reads a page's data into a [`Frame`] from disk.
     pub async fn read_into(&self, pid: PageId, mut frame: Frame) -> Result<Frame, Frame> {

@@ -4,8 +4,6 @@ use crate::disk::{disk_manager::DiskManagerHandle, frame::Frame};
 use std::ops::{Deref, DerefMut};
 use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
 
-// TODO implement Optimistic Read Guard
-
 /// A read guard for a [`Page`](super::Page)'s [`Frame`], which pins the page's data in memory.
 ///
 /// When this guard is dereferenced, it is guaranteed to point to valid and correct page data.

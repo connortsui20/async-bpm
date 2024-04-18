@@ -11,7 +11,7 @@ pub const PAGE_SIZE: usize = 1 << 12;
 pub struct Page {
     pub(crate) pid: PageId,
     pub(crate) eviction_state: Temperature,
-    pub(crate) inner: RwLock<Option<Frame>>, // TODO change to hybrid latch
+    pub(crate) inner: RwLock<Option<Frame>>,
 }
 
 /// A shared reference to a [`Page`].
