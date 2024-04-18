@@ -192,7 +192,10 @@ impl BufferPoolManager {
 
         loop {
             // Pages referenced in the `active_pages` list are guaranteed to own `Frame`s
-            let active_guard = bpm.active_pages.lock().await;
+            let Ok(active_guard) = bpm.active_pages.try_lock() else {
+                tokio::task::yield_now().await;
+                continue;
+            };
 
             let pids: Vec<_> = active_guard.deref().iter().copied().collect();
 
@@ -200,6 +203,8 @@ impl BufferPoolManager {
 
             // Run all eviction futures concurrently
             future::join_all(pids.iter().map(|pid| self.cool(pid))).await;
+
+            tokio::task::yield_now().await;
         }
     }
 }
