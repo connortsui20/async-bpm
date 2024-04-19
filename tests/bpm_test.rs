@@ -38,8 +38,11 @@ fn test_bpm_threads() {
             });
 
             rt.block_on(local);
+
+            loop {}
         });
 
+        // Spawn all threads
         for i in 0..THREADS {
             let bpm_clone = bpm.clone();
 
@@ -54,7 +57,7 @@ fn test_bpm_threads() {
                             uring_daemon
                                 .submit()
                                 .expect("Was unable to submit `io_uring` operations");
-                            uring_daemon.poll();
+                            // uring_daemon.poll();
                         })
                         .enable_all()
                         .build()
@@ -72,9 +75,7 @@ fn test_bpm_threads() {
 
                     drop(guard);
 
-                    loop {
-                        tokio::task::yield_now().await;
-                    }
+                    loop {}
                 });
 
                 rt.block_on(local);

@@ -52,8 +52,7 @@ impl IoUringAsync {
         let async_fd = AsyncFd::new(self.clone()).unwrap();
 
         loop {
-            let mut guard = async_fd.writable().await.unwrap();
-
+            let mut guard = async_fd.readable().await.unwrap();
             guard.get_inner().poll();
             guard.clear_ready();
         }
