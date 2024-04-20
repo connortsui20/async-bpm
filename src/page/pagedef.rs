@@ -7,7 +7,8 @@ use tokio::sync::RwLock;
 /// The size of a buffer [`Frame`] / logical [`Page`] of data.
 pub const PAGE_SIZE: usize = 1 << 12;
 
-/// A shared logical [`Page`] object. All access should be done through a [`PageHandle`]()
+/// A shared logical [`Page`] object. All access should be done through a
+/// [`PageHandle`](super::PageHandle).
 #[derive(Derivative)]
 #[derivative(Debug, PartialEq, Eq, Hash)]
 pub struct Page {

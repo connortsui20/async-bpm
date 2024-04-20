@@ -164,10 +164,10 @@ impl PageHandle {
 
     /// Cools the page, evicting it if it is already cool.
     ///
-    /// This function will "cool" any [`Hot`](TemperatureState::Hot) [`Page`] down to a
+    /// This function will "cool" any [`Hot`](TemperatureState::Hot) [`Page`](super::Page) down to a
     /// [`Cool`](TemperatureState::Cool) [`TemperatureState`], and it will evict any
-    /// [`Cool`](TemperatureState::Cool) [`Page`] completely out of memory, which will set the
-    /// [`TemperatureState`] down to [`Cold`](TemperatureState::Cold).
+    /// [`Cool`](TemperatureState::Cool) [`Page`](super::Page) completely out of memory, which will
+    /// set the [`TemperatureState`] down to [`Cold`](TemperatureState::Cold).
     pub(crate) async fn cool(&self) {
         match self.page.eviction_state.load(Ordering::Acquire) {
             TemperatureState::Cold => panic!("Found a Cold page in the active list of pages"),
