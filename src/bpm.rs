@@ -19,7 +19,7 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::{Mutex, RwLock};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// A parallel Buffer Pool Manager that manages bringing logical pages from disk into memory via
 /// shared and fixed buffer frames.
@@ -175,7 +175,7 @@ impl BufferPoolManager {
         loop {
             // Pages referenced in the `active_pages` list are guaranteed to own `Frame`s
             let Ok(active_guard) = bpm.active_pages.try_lock() else {
-                debug!("Contention on Active Pages in Evictor");
+                warn!("Contention on Active Pages in Evictor");
                 continue;
             };
 

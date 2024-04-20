@@ -10,7 +10,7 @@ use derivative::Derivative;
 use std::sync::Arc;
 use std::{ops::Deref, sync::atomic::Ordering};
 use tokio::sync::RwLockWriteGuard;
-use tracing::debug;
+use tracing::{debug, warn};
 
 /// A thread-local handle to a logical page of data.
 #[derive(Derivative)]
@@ -64,7 +64,10 @@ impl PageHandle {
             .eviction_state
             .store(TemperatureState::Hot, Ordering::Release);
 
-        let read_guard = self.page.inner.try_read().ok()?;
+        let Ok(read_guard) = self.page.inner.try_read() else {
+            warn!("Try read {} failed", self.page.pid);
+            return None;
+        };
 
         // If it is already loaded, then we're done
         if read_guard.deref().is_some() {
@@ -110,7 +113,10 @@ impl PageHandle {
             .eviction_state
             .store(TemperatureState::Hot, Ordering::Release);
 
-        let mut write_guard = self.page.inner.try_write().ok()?;
+        let Ok(mut write_guard) = self.page.inner.try_write() else {
+            warn!("Try write {} failed", self.page.pid);
+            return None;
+        };
 
         // If it is already loaded, then we're done
         if write_guard.deref().is_some() {
@@ -217,6 +223,8 @@ impl PageHandle {
 
         if let Some(guard) = self.try_write().await {
             self.evict_inner(guard).await;
+        } else {
+            warn!("Eviction of {} failed", self.page.pid);
         }
     }
 

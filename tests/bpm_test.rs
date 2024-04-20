@@ -18,7 +18,8 @@ fn test_bpm_threads() {
         .with_line_number(true)
         .with_thread_ids(true)
         .with_target(false)
-        .with_max_level(Level::DEBUG)
+        .without_time()
+        .with_max_level(Level::TRACE)
         .with_writer(Mutex::new(log_file))
         .finish();
     tracing::subscriber::set_global_default(stdout_subscriber).unwrap();
