@@ -176,6 +176,7 @@ impl BufferPoolManager {
             // Pages referenced in the `active_pages` list are guaranteed to own `Frame`s
             let Ok(active_guard) = bpm.active_pages.try_lock() else {
                 warn!("Contention on Active Pages in Evictor");
+                tokio::task::yield_now().await;
                 continue;
             };
 
@@ -184,6 +185,7 @@ impl BufferPoolManager {
             drop(active_guard);
 
             if pids.is_empty() {
+                tokio::task::yield_now().await;
                 continue;
             }
 
@@ -195,6 +197,8 @@ impl BufferPoolManager {
                 ph.cool().await;
             }))
             .await;
+
+            tokio::task::yield_now().await;
         }
     }
 }
