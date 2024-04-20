@@ -57,7 +57,7 @@ fn test_bpm_threads() {
                             uring_daemon
                                 .submit()
                                 .expect("Was unable to submit `io_uring` operations");
-                            // uring_daemon.poll();
+                            uring_daemon.poll();
                         })
                         .enable_all()
                         .build()
@@ -67,7 +67,7 @@ fn test_bpm_threads() {
                 let local = LocalSet::new();
                 local.spawn_local(async move {
                     let pid = PageId::new(i as u64);
-                    let ph = bpm_clone.get_page(&pid).await.unwrap();
+                    let ph = bpm_clone.get_page(&pid).await;
 
                     let mut guard = ph.write().await;
 
