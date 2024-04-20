@@ -1,15 +1,31 @@
 use async_bpm::{bpm::BufferPoolManager, page::PageId};
 use send_wrapper::SendWrapper;
+use std::fs::File;
+use std::sync::Mutex;
 use std::thread;
 use std::{ops::DerefMut, rc::Rc, sync::Arc};
 use tokio::{runtime::Builder, task::LocalSet};
+use tracing::Level;
 
 #[test]
 #[ignore]
 fn test_bpm_threads() {
-    const THREADS: usize = 95;
+    let log_file = File::create("bpm_test.log").unwrap();
 
-    let bpm = Arc::new(BufferPoolManager::new(4, THREADS));
+    let stdout_subscriber = tracing_subscriber::fmt()
+        .compact()
+        .with_file(true)
+        .with_line_number(true)
+        .with_thread_ids(true)
+        .with_target(false)
+        .with_max_level(Level::DEBUG)
+        .with_writer(Mutex::new(log_file))
+        .finish();
+    tracing::subscriber::set_global_default(stdout_subscriber).unwrap();
+
+    const THREADS: usize = 4;
+
+    let bpm = Arc::new(BufferPoolManager::new(2, THREADS));
 
     thread::scope(|s| {
         // Spawn the eviction thread / single task

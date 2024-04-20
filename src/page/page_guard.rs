@@ -1,8 +1,10 @@
 //! Wrappers around `tokio`'s `RwLockReadGuard` and `RwLockWriteGuard`, dedicated for pages of data.
 
+use super::PageId;
 use crate::disk::{disk_manager::DiskManagerHandle, frame::Frame};
 use std::ops::{Deref, DerefMut};
 use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
+use tracing::debug;
 
 /// A read guard for a [`Page`](super::Page)'s [`Frame`], which pins the page's data in memory.
 ///
@@ -10,19 +12,19 @@ use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
 ///
 /// This guard can only be dereferenced in read mode, but other tasks (potentially on different
 /// worker threads) are allowed to read from this same page.
-#[derive(Debug)]
 pub struct ReadPageGuard<'a> {
+    pid: PageId,
     guard: RwLockReadGuard<'a, Option<Frame>>,
 }
 
 impl<'a> ReadPageGuard<'a> {
-    pub(crate) fn new(guard: RwLockReadGuard<'a, Option<Frame>>) -> Self {
+    pub(crate) fn new(pid: PageId, guard: RwLockReadGuard<'a, Option<Frame>>) -> Self {
         assert!(
             guard.deref().is_some(),
             "Cannot create a ReadPageGuard that does not own a Frame"
         );
 
-        Self { guard }
+        Self { pid, guard }
     }
 }
 
@@ -37,26 +39,36 @@ impl<'a> Deref for ReadPageGuard<'a> {
     }
 }
 
+impl<'a> Drop for ReadPageGuard<'a> {
+    fn drop(&mut self) {
+        debug!("Dropping ReadPageGuard {}", self.pid);
+    }
+}
+
 /// A write guard for a [`Page`](super::Page)'s [`Frame`], which pins the page's data in memory.
 ///
 /// When this guard is dereferenced, it is guaranteed to point to valid and correct page data.
 ///
 /// This guard can be dereferenced in both read and write mode, and no other tasks or threads can
 /// access the page's data while a task has this guard.
-#[derive(Debug)]
 pub struct WritePageGuard<'a> {
+    pid: PageId,
     pub(crate) guard: RwLockWriteGuard<'a, Option<Frame>>,
     pub(crate) dm: DiskManagerHandle,
 }
 
 impl<'a> WritePageGuard<'a> {
-    pub(crate) fn new(guard: RwLockWriteGuard<'a, Option<Frame>>, dm: DiskManagerHandle) -> Self {
+    pub(crate) fn new(
+        pid: PageId,
+        guard: RwLockWriteGuard<'a, Option<Frame>>,
+        dm: DiskManagerHandle,
+    ) -> Self {
         assert!(
             guard.deref().is_some(),
             "Cannot create a WritePageGuard that does not own a Frame"
         );
 
-        Self { guard, dm }
+        Self { pid, guard, dm }
     }
 
     pub async fn flush(&mut self) {
@@ -78,7 +90,7 @@ impl<'a> WritePageGuard<'a> {
             .dm
             .write_from(pid, frame)
             .await
-            .unwrap_or_else(|_| panic!("Was unable to write data from page {:?} to disk", pid));
+            .unwrap_or_else(|_| panic!("Was unable to write data from page {} to disk", pid));
 
         let res = self.guard.replace(frame);
         assert!(res.is_none());
@@ -102,5 +114,11 @@ impl<'a> DerefMut for WritePageGuard<'a> {
             .deref_mut()
             .as_mut()
             .expect("Somehow have a WritePageGuard without an owned frame")
+    }
+}
+
+impl<'a> Drop for WritePageGuard<'a> {
+    fn drop(&mut self) {
+        debug!("Dropping WritePageGuard {}", self.pid);
     }
 }

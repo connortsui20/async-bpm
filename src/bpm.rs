@@ -16,9 +16,10 @@ use std::{
     io::IoSlice,
     io::IoSliceMut,
     ops::Deref,
-    sync::{atomic::Ordering, Arc},
+    sync::Arc,
 };
 use tokio::sync::{Mutex, RwLock};
+use tracing::{debug, info};
 
 /// A parallel Buffer Pool Manager that manages bringing logical pages from disk into memory via
 /// shared and fixed buffer frames.
@@ -112,6 +113,8 @@ impl BufferPoolManager {
     ///
     /// If the page already exists, this function will return that instead.
     async fn create_page(self: &Arc<Self>, pid: &PageId) -> PageHandle {
+        info!("Creating {} Handle", pid);
+
         // First check if it exists already
         let mut pages_guard = self.pages.write().await;
         if let Some(page) = pages_guard.get(pid) {
@@ -127,6 +130,7 @@ impl BufferPoolManager {
             pid: *pid,
             eviction_state: Temperature::new(TemperatureState::Cold),
             inner: RwLock::new(None),
+            bpm: self.clone(),
         });
 
         pages_guard.insert(*pid, page.clone());
@@ -140,6 +144,8 @@ impl BufferPoolManager {
     ///
     /// If the page does not already exist, this function will create it and then return it.
     pub async fn get_page(self: &Arc<Self>, pid: &PageId) -> PageHandle {
+        debug!("Getting {} Handle", pid);
+
         let pages_guard = self.pages.read().await;
 
         // Get the page if it exists, otherwise create it and return
@@ -159,25 +165,6 @@ impl BufferPoolManager {
         self.disk_manager.create_handle()
     }
 
-    /// Cools a given page, evicting it if it is already cool.
-    ///
-    /// This function will "cool" any [`Hot`](TemperatureState::Hot) [`Page`] down to a
-    /// [`Cool`](TemperatureState::Cool) [`TemperatureState`], and it will evict any
-    /// [`Cool`](TemperatureState::Cool) [`Page`] completely out of memory, which will set the
-    /// [`TemperatureState`] down to [`Cold`](TemperatureState::Cold).
-    async fn cool(self: &Arc<Self>, pid: &PageId) {
-        let page_handle = self.get_page(pid).await;
-
-        match page_handle.page.eviction_state.load(Ordering::Acquire) {
-            TemperatureState::Cold => panic!("Found a Cold page in the active list of pages"),
-            TemperatureState::Cool => page_handle.evict().await,
-            TemperatureState::Hot => page_handle
-                .page
-                .eviction_state
-                .store(TemperatureState::Cool, Ordering::Release),
-        }
-    }
-
     /// Continuously runs the eviction algorithm in a loop.
     ///
     /// This `Future` should be placed onto the task queue of every worker so that it does not stall
@@ -188,7 +175,7 @@ impl BufferPoolManager {
         loop {
             // Pages referenced in the `active_pages` list are guaranteed to own `Frame`s
             let Ok(active_guard) = bpm.active_pages.try_lock() else {
-                tokio::task::yield_now().await;
+                debug!("Contention on Active Pages in Evictor");
                 continue;
             };
 
@@ -196,10 +183,18 @@ impl BufferPoolManager {
 
             drop(active_guard);
 
-            // Run all eviction futures concurrently
-            future::join_all(pids.iter().map(|pid| self.cool(pid))).await;
+            if pids.is_empty() {
+                continue;
+            }
 
-            tokio::task::yield_now().await;
+            info!("Active pages: {:?}", pids);
+
+            // Run all eviction futures concurrently
+            future::join_all(pids.iter().map(|pid| async {
+                let ph = self.get_page(pid).await;
+                ph.cool().await;
+            }))
+            .await;
         }
     }
 }
