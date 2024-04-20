@@ -72,6 +72,8 @@ impl<'a> WritePageGuard<'a> {
     }
 
     pub async fn flush(&mut self) {
+        debug!("Flushing {}", self.pid);
+
         if self.guard.is_none() {
             // There is nothing for us to flush
             return;
