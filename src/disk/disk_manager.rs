@@ -90,13 +90,12 @@ impl DiskManager {
                 unsafe { std::slice::from_raw_parts(ptr, self.register_buffers.len()) };
 
             let raw_uring = uring.uring.borrow_mut();
+            let submitter = raw_uring.submitter();
 
             warn!("About to register buffers");
 
-            let submitter = raw_uring.submitter();
-
-            // Safety: Since the slice came from `io_slices`, which has a fully `'static` lifetime in
-            // both the slice of buffers and the buffers themselves, this is safe.
+            // Safety: Since the slice came from `io_slices`, which has a fully `'static` lifetime
+            // in both the slice of buffers and the buffers themselves, this is safe.
             unsafe { submitter.register_buffers(raw_buffers) }
                 .expect("Was unable to register buffers");
 
