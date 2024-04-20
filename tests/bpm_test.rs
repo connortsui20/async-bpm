@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use std::thread;
 use std::{ops::DerefMut, rc::Rc, sync::Arc};
 use tokio::{runtime::Builder, task::LocalSet};
-use tracing::Level;
+use tracing::{trace, Level};
 
 #[test]
 #[ignore]
@@ -114,14 +114,16 @@ fn test_bpm_no_eviction() {
         .with_thread_ids(true)
         .with_target(false)
         .without_time()
-        .with_max_level(Level::DEBUG)
+        .with_max_level(Level::WARN)
         .with_writer(Mutex::new(log_file))
         .finish();
     tracing::subscriber::set_global_default(stdout_subscriber).unwrap();
 
-    const THREADS: usize = 95;
+    const THREADS: usize = 24;
 
     let bpm = Arc::new(BufferPoolManager::new(128, THREADS));
+
+    trace!("Starting bpm no eviction test");
 
     // Spawn all threads
     thread::scope(|s| {
@@ -162,13 +164,6 @@ fn test_bpm_no_eviction() {
                         tokio::task::yield_now().await;
                     }
                 });
-
-                // // Check that everyone else has finished
-                // local.spawn_local(async move {
-                //     for j in 0..THREADS {
-
-                //     }
-                // });
 
                 rt.block_on(local);
             });

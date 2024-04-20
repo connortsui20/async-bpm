@@ -14,6 +14,7 @@ use std::{
     sync::Arc,
 };
 use thread_local::ThreadLocal;
+use tracing::{trace, warn};
 
 /// Manages reads into and writes from [`Frame`]s between memory and disk.
 #[derive(Debug)]
@@ -90,10 +91,16 @@ impl DiskManager {
 
             let raw_uring = uring.uring.borrow_mut();
 
+            warn!("About to register buffers");
+
+            let submitter = raw_uring.submitter();
+
             // Safety: Since the slice came from `io_slices`, which has a fully `'static` lifetime in
             // both the slice of buffers and the buffers themselves, this is safe.
-            unsafe { raw_uring.submitter().register_buffers(raw_buffers) }
+            unsafe { submitter.register_buffers(raw_buffers) }
                 .expect("Was unable to register buffers");
+
+            warn!("Finished registering buffers");
         }
 
         // Install and return the new thread-local `IoUringAsync` instance
