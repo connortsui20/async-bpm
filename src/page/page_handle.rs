@@ -10,6 +10,7 @@ use derivative::Derivative;
 use std::sync::Arc;
 use std::{ops::Deref, sync::atomic::Ordering};
 use tokio::sync::RwLockWriteGuard;
+use tracing::debug;
 
 /// A thread-local handle to a logical page of data.
 #[derive(Derivative)]
@@ -32,6 +33,8 @@ impl PageHandle {
 
     /// Gets a read guard on a logical page, which guarantees the data is in memory.
     pub async fn read(&self) -> ReadPageGuard {
+        debug!("Read locking {}", self.page.pid);
+
         self.page
             .eviction_state
             .store(TemperatureState::Hot, Ordering::Release);
@@ -40,7 +43,7 @@ impl PageHandle {
 
         // If it is already loaded, then we're done
         if read_guard.deref().is_some() {
-            return ReadPageGuard::new(read_guard);
+            return ReadPageGuard::new(self.page.pid, read_guard);
         }
 
         // Otherwise we need to load the page into memory with a write guard
@@ -49,12 +52,14 @@ impl PageHandle {
 
         self.load(&mut write_guard).await;
 
-        ReadPageGuard::new(write_guard.downgrade())
+        ReadPageGuard::new(self.page.pid, write_guard.downgrade())
     }
 
     /// Attempts to grab the read lock. If unsuccessful, this function does nothing. Otherwise, this
     /// function behaves identically to [`PageHandle::read`].
     pub async fn try_read(&self) -> Option<ReadPageGuard> {
+        debug!("Try read locking {}", self.page.pid);
+
         self.page
             .eviction_state
             .store(TemperatureState::Hot, Ordering::Release);
@@ -63,7 +68,7 @@ impl PageHandle {
 
         // If it is already loaded, then we're done
         if read_guard.deref().is_some() {
-            return Some(ReadPageGuard::new(read_guard));
+            return Some(ReadPageGuard::new(self.page.pid, read_guard));
         }
 
         // Otherwise we need to load the page into memory with a write guard
@@ -72,11 +77,13 @@ impl PageHandle {
 
         self.load(&mut write_guard).await;
 
-        Some(ReadPageGuard::new(write_guard.downgrade()))
+        Some(ReadPageGuard::new(self.page.pid, write_guard.downgrade()))
     }
 
     /// Gets a write guard on a logical page, which guarantees the data is in memory.
     pub async fn write(&self) -> WritePageGuard {
+        debug!("Write locking {}", self.page.pid);
+
         self.page
             .eviction_state
             .store(TemperatureState::Hot, Ordering::Release);
@@ -85,18 +92,20 @@ impl PageHandle {
 
         // If it is already loaded, then we're done
         if write_guard.deref().is_some() {
-            return WritePageGuard::new(write_guard, self.dm.clone());
+            return WritePageGuard::new(self.page.pid, write_guard, self.dm.clone());
         }
 
         // Otherwise we need to load the page into memory
         self.load(&mut write_guard).await;
 
-        WritePageGuard::new(write_guard, self.dm.clone())
+        WritePageGuard::new(self.page.pid, write_guard, self.dm.clone())
     }
 
     /// Attempts to grab the write lock. If unsuccessful, this function does nothing. Otherwise,
     /// this function behaves identically to [`PageHandle::write`].
     pub async fn try_write(&self) -> Option<WritePageGuard> {
+        debug!("Try write locking {}", self.page.pid);
+
         self.page
             .eviction_state
             .store(TemperatureState::Hot, Ordering::Release);
@@ -105,17 +114,27 @@ impl PageHandle {
 
         // If it is already loaded, then we're done
         if write_guard.deref().is_some() {
-            return Some(WritePageGuard::new(write_guard, self.dm.clone()));
+            return Some(WritePageGuard::new(
+                self.page.pid,
+                write_guard,
+                self.dm.clone(),
+            ));
         }
 
         // Otherwise we need to load the page into memory
         self.load(&mut write_guard).await;
 
-        Some(WritePageGuard::new(write_guard, self.dm.clone()))
+        Some(WritePageGuard::new(
+            self.page.pid,
+            write_guard,
+            self.dm.clone(),
+        ))
     }
 
     /// Loads page data from disk into a frame in memory.
     async fn load(&self, guard: &mut RwLockWriteGuard<'_, Option<Frame>>) {
+        debug!("Loading {} from disk", self.page.pid);
+
         // If someone else got in front of us and loaded the page for us
         if guard.deref().is_some() {
             return;
@@ -139,7 +158,7 @@ impl PageHandle {
             .await
             .unwrap_or_else(|_| {
                 panic!(
-                    "Was unable to read data from page {:?} from disk",
+                    "Was unable to read data from page {} from disk",
                     self.page.pid
                 )
             });
@@ -169,6 +188,8 @@ impl PageHandle {
     /// [`Cool`](TemperatureState::Cool) [`Page`](super::Page) completely out of memory, which will
     /// set the [`TemperatureState`] down to [`Cold`](TemperatureState::Cold).
     pub(crate) async fn cool(&self) {
+        debug!("Cooling {}", self.page.pid);
+
         match self.page.eviction_state.load(Ordering::Acquire) {
             TemperatureState::Cold => panic!("Found a Cold page in the active list of pages"),
             TemperatureState::Cool => self.try_evict().await,
@@ -182,6 +203,8 @@ impl PageHandle {
     /// Evicts the page's data, freeing the [`Frame`] that this [`Page`](super::Page) owns, and
     /// making the [`Frame`] available for other [`Page`](super::Page)s to use.
     pub async fn evict(&self) {
+        debug!("Evicting {}", self.page.pid);
+
         let guard = self.write().await;
 
         self.evict_inner(guard).await;
@@ -190,6 +213,8 @@ impl PageHandle {
     /// Attempts to grab the write lock. If unsuccessful, this function does nothing. Otherwise,
     /// it behaves identically to [`PageHandle::evict`].
     pub async fn try_evict(&self) {
+        debug!("Try evicting {}", self.page.pid);
+
         if let Some(guard) = self.try_write().await {
             self.evict_inner(guard).await;
         }

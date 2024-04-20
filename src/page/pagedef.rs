@@ -1,7 +1,7 @@
 use super::eviction::Temperature;
 use crate::{bpm::BufferPoolManager, disk::frame::Frame};
 use derivative::Derivative;
-use std::sync::Arc;
+use std::{fmt::Display, sync::Arc};
 use tokio::sync::RwLock;
 
 /// The size of a buffer [`Frame`] / logical [`Page`] of data.
@@ -31,6 +31,12 @@ pub type PageRef = Arc<Page>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PageId {
     inner: u64,
+}
+
+impl Display for PageId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Page {}", self.inner)
+    }
 }
 
 impl PageId {

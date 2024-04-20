@@ -19,6 +19,7 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::{Mutex, RwLock};
+use tracing::{debug, info};
 
 /// A parallel Buffer Pool Manager that manages bringing logical pages from disk into memory via
 /// shared and fixed buffer frames.
@@ -112,6 +113,8 @@ impl BufferPoolManager {
     ///
     /// If the page already exists, this function will return that instead.
     async fn create_page(self: &Arc<Self>, pid: &PageId) -> PageHandle {
+        info!("Creating {} Handle", pid);
+
         // First check if it exists already
         let mut pages_guard = self.pages.write().await;
         if let Some(page) = pages_guard.get(pid) {
@@ -141,6 +144,8 @@ impl BufferPoolManager {
     ///
     /// If the page does not already exist, this function will create it and then return it.
     pub async fn get_page(self: &Arc<Self>, pid: &PageId) -> PageHandle {
+        debug!("Getting {} Handle", pid);
+
         let pages_guard = self.pages.read().await;
 
         // Get the page if it exists, otherwise create it and return
@@ -170,12 +175,19 @@ impl BufferPoolManager {
         loop {
             // Pages referenced in the `active_pages` list are guaranteed to own `Frame`s
             let Ok(active_guard) = bpm.active_pages.try_lock() else {
+                debug!("Contention on Active Pages in Evictor");
                 continue;
             };
 
             let pids: Vec<_> = active_guard.deref().iter().copied().collect();
 
             drop(active_guard);
+
+            if pids.is_empty() {
+                continue;
+            }
+
+            info!("Active pages: {:?}", pids);
 
             // Run all eviction futures concurrently
             future::join_all(pids.iter().map(|pid| async {
