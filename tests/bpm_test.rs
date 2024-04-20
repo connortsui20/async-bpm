@@ -24,42 +24,42 @@ fn test_bpm_threads() {
         .finish();
     tracing::subscriber::set_global_default(stdout_subscriber).unwrap();
 
-    const THREADS: usize = 4;
+    const THREADS: usize = 8;
 
     let bpm = Arc::new(BufferPoolManager::new(2, THREADS));
 
-    thread::scope(|s| {
-        // Spawn the eviction thread / single task
-        s.spawn(|| {
-            let bpm_clone = bpm.clone();
-            let dmh = bpm_clone.get_disk_manager();
-            let uring = Rc::new(dmh.get_uring());
+    // Spawn the eviction thread / single task
+    let bpm_evictor = bpm.clone();
+    thread::spawn(move || {
+        let dmh = bpm_evictor.get_disk_manager();
+        let uring = Rc::new(dmh.get_uring());
 
-            let uring_daemon = SendWrapper::new(uring.clone());
-            let rt = Arc::new(
-                Builder::new_current_thread()
-                    .on_thread_park(move || {
-                        uring_daemon
-                            .submit()
-                            .expect("Was unable to submit `io_uring` operations");
-                        uring_daemon.poll();
-                    })
-                    .enable_all()
-                    .build()
-                    .unwrap(),
-            );
+        let uring_daemon = SendWrapper::new(uring.clone());
+        let rt = Arc::new(
+            Builder::new_current_thread()
+                .on_thread_park(move || {
+                    uring_daemon
+                        .submit()
+                        .expect("Was unable to submit `io_uring` operations");
+                    uring_daemon.poll();
+                })
+                .enable_all()
+                .build()
+                .unwrap(),
+        );
 
-            let local = LocalSet::new();
-            local.spawn_local(async move {
-                bpm_clone.evictor().await;
-            });
-
-            rt.block_on(local);
-
-            loop {}
+        let local = LocalSet::new();
+        local.spawn_local(async move {
+            bpm_evictor.evictor().await;
         });
 
-        // Spawn all threads
+        rt.block_on(local);
+
+        loop {}
+    });
+
+    // Spawn all threads
+    thread::scope(|s| {
         for i in 0..THREADS {
             let bpm_clone = bpm.clone();
 
