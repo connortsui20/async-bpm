@@ -16,7 +16,7 @@ use std::{
     io::IoSlice,
     io::IoSliceMut,
     ops::Deref,
-    sync::{atomic::Ordering, Arc},
+    sync::Arc,
 };
 use tokio::sync::{Mutex, RwLock};
 
@@ -127,6 +127,7 @@ impl BufferPoolManager {
             pid: *pid,
             eviction_state: Temperature::new(TemperatureState::Cold),
             inner: RwLock::new(None),
+            bpm: self.clone(),
         });
 
         pages_guard.insert(*pid, page.clone());
@@ -159,25 +160,6 @@ impl BufferPoolManager {
         self.disk_manager.create_handle()
     }
 
-    /// Cools a given page, evicting it if it is already cool.
-    ///
-    /// This function will "cool" any [`Hot`](TemperatureState::Hot) [`Page`] down to a
-    /// [`Cool`](TemperatureState::Cool) [`TemperatureState`], and it will evict any
-    /// [`Cool`](TemperatureState::Cool) [`Page`] completely out of memory, which will set the
-    /// [`TemperatureState`] down to [`Cold`](TemperatureState::Cold).
-    async fn cool(self: &Arc<Self>, pid: &PageId) {
-        let page_handle = self.get_page(pid).await;
-
-        match page_handle.page.eviction_state.load(Ordering::Acquire) {
-            TemperatureState::Cold => panic!("Found a Cold page in the active list of pages"),
-            TemperatureState::Cool => page_handle.evict().await,
-            TemperatureState::Hot => page_handle
-                .page
-                .eviction_state
-                .store(TemperatureState::Cool, Ordering::Release),
-        }
-    }
-
     /// Continuously runs the eviction algorithm in a loop.
     ///
     /// This `Future` should be placed onto the task queue of every worker so that it does not stall
@@ -188,7 +170,6 @@ impl BufferPoolManager {
         loop {
             // Pages referenced in the `active_pages` list are guaranteed to own `Frame`s
             let Ok(active_guard) = bpm.active_pages.try_lock() else {
-                tokio::task::yield_now().await;
                 continue;
             };
 
@@ -197,9 +178,11 @@ impl BufferPoolManager {
             drop(active_guard);
 
             // Run all eviction futures concurrently
-            future::join_all(pids.iter().map(|pid| self.cool(pid))).await;
-
-            tokio::task::yield_now().await;
+            future::join_all(pids.iter().map(|pid| async {
+                let ph = self.get_page(pid).await;
+                ph.cool().await;
+            }))
+            .await;
         }
     }
 }

@@ -1,5 +1,6 @@
 use super::eviction::Temperature;
-use crate::disk::frame::Frame;
+use crate::{bpm::BufferPoolManager, disk::frame::Frame};
+use derivative::Derivative;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -7,11 +8,19 @@ use tokio::sync::RwLock;
 pub const PAGE_SIZE: usize = 1 << 12;
 
 /// A shared logical [`Page`] object. All access should be done through a [`PageHandle`]()
-#[derive(Debug)]
+#[derive(Derivative)]
+#[derivative(Debug, PartialEq, Eq, Hash)]
 pub struct Page {
     pub(crate) pid: PageId,
+
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) eviction_state: Temperature,
+
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) inner: RwLock<Option<Frame>>,
+
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    pub(crate) bpm: Arc<BufferPoolManager>,
 }
 
 /// A shared reference to a [`Page`].
