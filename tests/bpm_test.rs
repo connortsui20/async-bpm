@@ -3,8 +3,9 @@ use std::fs::File;
 use std::sync::Mutex;
 use std::thread;
 use std::{ops::DerefMut, sync::Arc};
+use tokio::sync::Barrier;
 use tokio::task::LocalSet;
-use tracing::{trace, Level};
+use tracing::{info, trace, Level};
 
 #[test]
 #[ignore]
@@ -53,6 +54,83 @@ fn test_bpm_threads() {
 
                     drop(guard);
 
+                    loop {}
+                });
+
+                rt.block_on(local);
+            });
+        }
+    });
+}
+
+#[test]
+#[ignore]
+fn test_bpm_upwards() {
+    trace!("Starting test_bpm_upwards");
+
+    let log_file = File::create("test_bpm_upwards.log").unwrap();
+
+    let stdout_subscriber = tracing_subscriber::fmt()
+        .compact()
+        .with_file(true)
+        .with_line_number(true)
+        .with_thread_ids(true)
+        .with_target(false)
+        .without_time()
+        .with_max_level(Level::WARN)
+        .with_writer(Mutex::new(log_file))
+        .finish();
+    tracing::subscriber::set_global_default(stdout_subscriber).unwrap();
+
+    const THREADS: usize = 8;
+
+    let bpm = Arc::new(BufferPoolManager::new(3, 32));
+
+    // Spawn the eviction thread / single task
+    let bpm_evictor = bpm.clone();
+    bpm_evictor.spawn_evictor();
+
+    // Spawn all threads
+    thread::scope(|s| {
+        let b = Arc::new(Barrier::new(THREADS));
+
+        for i in 0..THREADS {
+            let bpm_clone = bpm.clone();
+            let barrier = b.clone();
+
+            s.spawn(move || {
+                let rt = bpm_clone.build_thread_runtime();
+
+                let local = LocalSet::new();
+                local.spawn_local(async move {
+                    let pid1 = PageId::new(i as u64);
+                    let pid2 = PageId::new((i + 1) as u64);
+                    let ph1 = bpm_clone.get_page(&pid1).await;
+                    let ph2 = bpm_clone.get_page(&pid2).await;
+
+                    let mut write_guard = ph1.write().await;
+
+                    write_guard.deref_mut().fill(b' ' + i as u8);
+                    write_guard.flush().await;
+
+                    // Check if the next thread has finished
+                    loop {
+                        let read_guard = ph2.read().await;
+                        let val = read_guard[0];
+                        drop(read_guard);
+
+                        if i == THREADS - 1 || val == (i + 1) as u8 {
+                            break;
+                        }
+                    }
+
+                    drop(write_guard);
+
+                    barrier.wait().await;
+
+                    info!("Finished test_bpm_threads test!");
+
+                    #[allow(clippy::empty_loop)]
                     loop {}
                 });
 
