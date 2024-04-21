@@ -14,7 +14,7 @@ use std::{
     sync::Arc,
 };
 use thread_local::ThreadLocal;
-use tracing::{trace, warn};
+use tracing::warn;
 
 /// Manages reads into and writes from [`Frame`]s between memory and disk.
 #[derive(Debug)]

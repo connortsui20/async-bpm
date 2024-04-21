@@ -1,15 +1,16 @@
 use async_bpm::{bpm::BufferPoolManager, page::PageId};
-use send_wrapper::SendWrapper;
 use std::fs::File;
 use std::sync::Mutex;
 use std::thread;
-use std::{ops::DerefMut, rc::Rc, sync::Arc};
-use tokio::{runtime::Builder, task::LocalSet};
+use std::{ops::DerefMut, sync::Arc};
+use tokio::task::LocalSet;
 use tracing::{trace, Level};
 
 #[test]
 #[ignore]
 fn test_bpm_threads() {
+    trace!("Starting test_bpm_threads");
+
     let log_file = File::create("test_bpm_threads.log").unwrap();
 
     let stdout_subscriber = tracing_subscriber::fmt()
@@ -48,6 +49,7 @@ fn test_bpm_threads() {
                     let mut guard = ph.write().await;
 
                     guard.deref_mut().fill(b' ' + i as u8);
+                    guard.flush().await;
 
                     drop(guard);
 
@@ -57,75 +59,5 @@ fn test_bpm_threads() {
                 rt.block_on(local);
             });
         }
-    });
-}
-
-#[test]
-#[ignore]
-fn test_bpm_no_eviction() {
-    let log_file = File::create("test_bpm_no_eviction.log").unwrap();
-
-    let stdout_subscriber = tracing_subscriber::fmt()
-        .compact()
-        .with_file(true)
-        .with_line_number(true)
-        .with_thread_ids(true)
-        .with_target(false)
-        .without_time()
-        .with_max_level(Level::WARN)
-        .with_writer(Mutex::new(log_file))
-        .finish();
-    tracing::subscriber::set_global_default(stdout_subscriber).unwrap();
-
-    const THREADS: usize = 24;
-
-    let bpm = Arc::new(BufferPoolManager::new(128, THREADS));
-
-    trace!("Starting bpm no eviction test");
-
-    // Spawn all threads
-    thread::scope(|s| {
-        for i in 0..THREADS {
-            let bpm_clone = bpm.clone();
-
-            s.spawn(move || {
-                let dmh = bpm_clone.get_disk_manager();
-                let uring = Rc::new(dmh.get_uring());
-
-                let uring_daemon = SendWrapper::new(uring.clone());
-                let rt = Arc::new(
-                    Builder::new_current_thread()
-                        .on_thread_park(move || {
-                            uring_daemon
-                                .submit()
-                                .expect("Was unable to submit `io_uring` operations");
-                            uring_daemon.poll();
-                        })
-                        .enable_all()
-                        .build()
-                        .unwrap(),
-                );
-
-                let local = LocalSet::new();
-                local.spawn_local(async move {
-                    let pid = PageId::new(i as u64);
-                    let ph = bpm_clone.get_page(&pid).await;
-
-                    let mut guard = ph.write().await;
-
-                    guard.deref_mut().fill(b' ' + i as u8);
-                    guard.flush().await;
-
-                    drop(guard);
-
-                    loop {
-                        tokio::task::yield_now().await;
-                    }
-                });
-
-                rt.block_on(local);
-            });
-        }
-        // run eviction thread
     });
 }
