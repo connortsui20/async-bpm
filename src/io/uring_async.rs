@@ -1,15 +1,16 @@
 use super::op::{Lifecycle, Op, OpInner};
 use derivative::Derivative;
 use io_uring::{squeue::Entry as SqEntry, IoUring};
+use libc::iovec;
 use std::{
     cell::RefCell,
     collections::HashMap,
-    io,
+    io::{self, IoSlice},
     os::fd::{AsRawFd, RawFd},
     rc::Rc,
 };
 use tokio::io::unix::AsyncFd;
-use tracing::trace;
+use tracing::{trace, warn};
 
 /// The default number of `io_uring` submission entries.
 pub const IO_URING_DEFAULT_ENTRIES: u16 = 1 << 12; // 4096
@@ -164,6 +165,26 @@ impl IoUringAsync {
                 }
             }
         }
+    }
+
+    pub fn register_buffers(&self, buffers: &[IoSlice<'static>]) {
+        let ptr = buffers.as_ptr() as *const iovec;
+
+        // Safety: Since the pointer came from a valid slice, and since `IoSliceMut` is ABI
+        // compatible with `iovec`, this is safe.
+        let raw_buffers: &'static [iovec] =
+            unsafe { std::slice::from_raw_parts(ptr, buffers.len()) };
+
+        let raw_uring = self.uring.borrow_mut();
+        let submitter = raw_uring.submitter();
+
+        warn!("About to register buffers");
+
+        // Safety: Since the slice came from `io_slices`, which has a fully `'static` lifetime
+        // in both the slice of buffers and the buffers themselves, this is safe.
+        unsafe { submitter.register_buffers(raw_buffers) }.expect("Was unable to register buffers");
+
+        warn!("Finished registering buffers");
     }
 }
 

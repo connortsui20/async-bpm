@@ -4,7 +4,7 @@ use crate::{
     page::{PageId, PAGE_SIZE},
 };
 use io_uring::{opcode, types::Fd};
-use libc::{iovec, O_DIRECT};
+use libc::O_DIRECT;
 use send_wrapper::SendWrapper;
 use std::{
     fs::{File, OpenOptions},
@@ -14,7 +14,6 @@ use std::{
     sync::Arc,
 };
 use thread_local::ThreadLocal;
-use tracing::warn;
 
 /// Manages reads into and writes from [`Frame`]s between memory and disk.
 #[derive(Debug)]
@@ -81,38 +80,13 @@ impl DiskManager {
         let uring = IoUringAsync::try_default().expect("Unable to create an `IoUring` instance");
 
         // TODO this doesn't work yet
-        // self.register_buffers(&uring);
+        // uring.register_buffers(&self.register_buffers);
 
         // Install and return the new thread-local `IoUringAsync` instance
         self.io_urings
             .get_or(|| SendWrapper::new(uring))
             .deref()
             .clone()
-    }
-
-    // TODO unlock resource limit
-    fn register_buffers(&self, uring: &IoUringAsync) {
-        // Now register the buffers as shared between the user and the kernel
-        {
-            let ptr = self.register_buffers.as_ptr() as *const iovec;
-
-            // Safety: Since the pointer came from a valid slice, and since `IoSliceMut` is ABI
-            // compatible with `iovec`, this is safe.
-            let raw_buffers: &'static [iovec] =
-                unsafe { std::slice::from_raw_parts(ptr, self.register_buffers.len()) };
-
-            let raw_uring = uring.uring.borrow_mut();
-            let submitter = raw_uring.submitter();
-
-            warn!("About to register buffers");
-
-            // Safety: Since the slice came from `io_slices`, which has a fully `'static` lifetime
-            // in both the slice of buffers and the buffers themselves, this is safe.
-            unsafe { submitter.register_buffers(raw_buffers) }
-                .expect("Was unable to register buffers");
-
-            warn!("Finished registering buffers");
-        }
     }
 }
 
