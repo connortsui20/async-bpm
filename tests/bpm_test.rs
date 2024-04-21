@@ -28,7 +28,7 @@ fn test_bpm_threads() {
 
     const THREADS: usize = 96;
 
-    let bpm = Arc::new(BufferPoolManager::new(2, 256));
+    let bpm = Arc::new(BufferPoolManager::new(2, THREADS * 2));
 
     // Spawn the eviction thread / single task
     let bpm_evictor = bpm.clone();
@@ -54,6 +54,7 @@ fn test_bpm_threads() {
 
                     drop(guard);
 
+                    #[allow(clippy::empty_loop)]
                     loop {}
                 });
 
@@ -77,14 +78,14 @@ fn test_bpm_upwards() {
         .with_thread_ids(true)
         .with_target(false)
         .without_time()
-        .with_max_level(Level::WARN)
+        .with_max_level(Level::INFO)
         .with_writer(Mutex::new(log_file))
         .finish();
     tracing::subscriber::set_global_default(stdout_subscriber).unwrap();
 
-    const THREADS: usize = 8;
+    const THREADS: usize = 95;
 
-    let bpm = Arc::new(BufferPoolManager::new(3, 32));
+    let bpm = Arc::new(BufferPoolManager::new(128, THREADS * 2));
 
     // Spawn the eviction thread / single task
     let bpm_evictor = bpm.clone();
@@ -104,14 +105,14 @@ fn test_bpm_upwards() {
                 let local = LocalSet::new();
                 local.spawn_local(async move {
                     let pid1 = PageId::new(i as u64);
-                    let pid2 = PageId::new((i + 1) as u64);
                     let ph1 = bpm_clone.get_page(&pid1).await;
-                    let ph2 = bpm_clone.get_page(&pid2).await;
 
                     let mut write_guard = ph1.write().await;
-
                     write_guard.deref_mut().fill(b' ' + i as u8);
                     write_guard.flush().await;
+
+                    let pid2 = PageId::new((i + 1) as u64);
+                    let ph2 = bpm_clone.get_page(&pid2).await;
 
                     // Check if the next thread has finished
                     loop {
@@ -119,9 +120,11 @@ fn test_bpm_upwards() {
                         let val = read_guard[0];
                         drop(read_guard);
 
-                        if i == THREADS - 1 || val == (i + 1) as u8 {
+                        if i == THREADS - 1 || val == b' ' + (i as u8) + 1 {
+                            trace!("Checked {} to be correct", pid2);
                             break;
                         }
+                        trace!("{} is not yet correct", pid2);
                     }
 
                     drop(write_guard);

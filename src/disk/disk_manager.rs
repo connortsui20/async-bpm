@@ -80,6 +80,18 @@ impl DiskManager {
         // Construct the new `IoUringAsync` instance
         let uring = IoUringAsync::try_default().expect("Unable to create an `IoUring` instance");
 
+        // TODO this doesn't work yet
+        // self.register_buffers(&uring);
+
+        // Install and return the new thread-local `IoUringAsync` instance
+        self.io_urings
+            .get_or(|| SendWrapper::new(uring))
+            .deref()
+            .clone()
+    }
+
+    // TODO unlock resource limit
+    fn register_buffers(&self, uring: &IoUringAsync) {
         // Now register the buffers as shared between the user and the kernel
         {
             let ptr = self.register_buffers.as_ptr() as *const iovec;
@@ -101,12 +113,6 @@ impl DiskManager {
 
             warn!("Finished registering buffers");
         }
-
-        // Install and return the new thread-local `IoUringAsync` instance
-        self.io_urings
-            .get_or(|| SendWrapper::new(uring))
-            .deref()
-            .clone()
     }
 }
 
