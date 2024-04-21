@@ -11,15 +11,20 @@ use crate::{
 use async_channel::{Receiver, Sender};
 use core::slice;
 use futures::future;
+use send_wrapper::SendWrapper;
 use std::{
     collections::{HashMap, HashSet},
-    io::IoSlice,
-    io::IoSliceMut,
+    io::{IoSlice, IoSliceMut},
     ops::Deref,
+    rc::Rc,
     sync::Arc,
 };
-use tokio::sync::{Mutex, RwLock};
-use tracing::{debug, info, warn};
+use tokio::{
+    runtime::{Builder, Runtime},
+    sync::{Mutex, RwLock},
+    task::LocalSet,
+};
+use tracing::{debug, info, trace, warn};
 
 /// A parallel Buffer Pool Manager that manages bringing logical pages from disk into memory via
 /// shared and fixed buffer frames.
@@ -200,5 +205,39 @@ impl BufferPoolManager {
 
             tokio::task::yield_now().await;
         }
+    }
+
+    pub fn spawn_evictor(self: &Arc<Self>) {
+        let bpm_clone = self.clone();
+        let bpm_evictor = self.clone();
+
+        std::thread::spawn(move || {
+            let rt = bpm_clone.build_thread_runtime();
+
+            let local = LocalSet::new();
+            local.spawn_local(async move {
+                bpm_evictor.evictor().await;
+            });
+
+            rt.block_on(local);
+        });
+    }
+
+    pub fn build_thread_runtime(self: &Arc<Self>) -> Runtime {
+        let dmh = self.get_disk_manager();
+        let uring = Rc::new(dmh.get_uring());
+        let uring_daemon = SendWrapper::new(uring.clone());
+
+        Builder::new_current_thread()
+            .on_thread_park(move || {
+                trace!("Thread parking");
+                uring_daemon
+                    .submit()
+                    .expect("Was unable to submit `io_uring` operations");
+                uring_daemon.poll();
+            })
+            .enable_all()
+            .build()
+            .unwrap()
     }
 }

@@ -19,44 +19,18 @@ fn test_bpm_threads() {
         .with_thread_ids(true)
         .with_target(false)
         .without_time()
-        .with_max_level(Level::TRACE)
+        .with_max_level(Level::WARN)
         .with_writer(Mutex::new(log_file))
         .finish();
     tracing::subscriber::set_global_default(stdout_subscriber).unwrap();
 
-    const THREADS: usize = 8;
+    const THREADS: usize = 96;
 
-    let bpm = Arc::new(BufferPoolManager::new(2, THREADS));
+    let bpm = Arc::new(BufferPoolManager::new(2, 256));
 
     // Spawn the eviction thread / single task
     let bpm_evictor = bpm.clone();
-    thread::spawn(move || {
-        let dmh = bpm_evictor.get_disk_manager();
-        let uring = Rc::new(dmh.get_uring());
-
-        let uring_daemon = SendWrapper::new(uring.clone());
-        let rt = Arc::new(
-            Builder::new_current_thread()
-                .on_thread_park(move || {
-                    uring_daemon
-                        .submit()
-                        .expect("Was unable to submit `io_uring` operations");
-                    uring_daemon.poll();
-                })
-                .enable_all()
-                .build()
-                .unwrap(),
-        );
-
-        let local = LocalSet::new();
-        local.spawn_local(async move {
-            bpm_evictor.evictor().await;
-        });
-
-        rt.block_on(local);
-
-        loop {}
-    });
+    bpm_evictor.spawn_evictor();
 
     // Spawn all threads
     thread::scope(|s| {
@@ -64,22 +38,7 @@ fn test_bpm_threads() {
             let bpm_clone = bpm.clone();
 
             s.spawn(move || {
-                let dmh = bpm_clone.get_disk_manager();
-                let uring = Rc::new(dmh.get_uring());
-
-                let uring_daemon = SendWrapper::new(uring.clone());
-                let rt = Arc::new(
-                    Builder::new_current_thread()
-                        .on_thread_park(move || {
-                            uring_daemon
-                                .submit()
-                                .expect("Was unable to submit `io_uring` operations");
-                            uring_daemon.poll();
-                        })
-                        .enable_all()
-                        .build()
-                        .unwrap(),
-                );
+                let rt = bpm_clone.build_thread_runtime();
 
                 let local = LocalSet::new();
                 local.spawn_local(async move {
@@ -98,7 +57,6 @@ fn test_bpm_threads() {
                 rt.block_on(local);
             });
         }
-        // run eviction thread
     });
 }
 
