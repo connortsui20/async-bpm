@@ -15,3 +15,5 @@ Cargo.lock
 
 *.log
 *.test
+
+Dockerfile
