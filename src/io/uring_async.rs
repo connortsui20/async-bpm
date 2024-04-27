@@ -167,6 +167,7 @@ impl IoUringAsync {
         }
     }
 
+    /// Registers fixed buffers into the `IoUringAsync` instance to be shared with the kernel.
     pub fn register_buffers(&self, buffers: &[IoSlice<'static>]) {
         let ptr = buffers.as_ptr() as *const iovec;
 
