@@ -31,6 +31,8 @@ pub struct DiskManager {
     io_urings: ThreadLocal<SendWrapper<IoUringAsync>>,
 
     /// The file storing all data. While the [`DiskManager`] has ownership, it won't be closed.
+    ///
+    /// TODO This should be abstracted to support any number of files
     file: File,
 }
 
@@ -80,6 +82,7 @@ impl DiskManager {
         let uring = IoUringAsync::try_default().expect("Unable to create an `IoUring` instance");
 
         // TODO this doesn't work yet
+        std::hint::black_box(&self.register_buffers);
         // uring.register_buffers(&self.register_buffers);
 
         // Install and return the new thread-local `IoUringAsync` instance
@@ -143,7 +146,7 @@ impl DiskManagerHandle {
         }
     }
 
-    // Retrieves the thread-local `io_uring` instance.
+    /// Retrieves the thread-local `io_uring` instance.
     pub fn get_uring(&self) -> IoUringAsync {
         self.uring.clone()
     }
