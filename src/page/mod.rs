@@ -1,4 +1,3 @@
-pub(crate) mod eviction;
 mod page_guard;
 mod page_handle;
 mod pagedef;
