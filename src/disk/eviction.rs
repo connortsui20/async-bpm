@@ -1,3 +1,5 @@
+//! This module contains the types used to manage eviction state for the frame eviction algorithm.
+
 use std::sync::atomic::{AtomicU8, Ordering};
 
 /// The type representing a [`Frame`](super::frame::Frame)'s eviction state.

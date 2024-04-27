@@ -1,3 +1,8 @@
+//! This module contains the definition and implementation of both [`DiskManager`] and
+//! [`DiskManagerHandle`].
+//!
+//! TODO
+
 use super::frame::Frame;
 use crate::{
     io::IoUringAsync,

@@ -1,3 +1,5 @@
+//! An asynchronous wrapper around an `io_uring` instance with asynchronous methods.
+
 use super::op::{Lifecycle, Op, OpInner};
 use derivative::Derivative;
 use io_uring::{squeue::Entry as SqEntry, IoUring};
