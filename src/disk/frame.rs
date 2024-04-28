@@ -11,6 +11,7 @@
 
 use super::eviction::{Temperature, TemperatureState};
 use crate::page::PageRef;
+use arc_swap::ArcSwapOption;
 use async_channel::{Receiver, Sender};
 use std::{
     io::IoSliceMut,
@@ -28,18 +29,21 @@ pub struct Frame {
     pub(crate) buf: IoSliceMut<'static>,
 
     /// A reference to the page that owns this [`Frame`], if an owner actually exists.
-    pub(crate) owner: Option<PageRef>,
+    pub(crate) owner: ArcSwapOption<PageRef>,
 
     /// The state of the frame with respect to its eviction.
     pub(crate) eviction_state: Temperature,
 }
+
+/// A reference-counted reference to a [`Frame`].
+pub type FrameRef = Arc<Frame>;
 
 impl Frame {
     /// Creates a new and owned [`Frame`] given a static [`IoSliceMut`].
     pub fn new(ioslice: IoSliceMut<'static>) -> Self {
         Self {
             buf: ioslice,
-            owner: None,
+            owner: ArcSwapOption::const_empty(),
             eviction_state: Temperature::new(TemperatureState::Cold),
         }
     }
@@ -81,6 +85,9 @@ pub struct FrameGroup {
     pub(crate) free_frames: (Sender<Frame>, Receiver<Frame>),
 }
 
+/// A reference-counted reference to a [`Frame`].
+pub type FrameGroupRef = Arc<FrameGroup>;
+
 impl FrameGroup {
     /// Gets a free frame in this `FrameGroup`.
     ///
@@ -90,5 +97,30 @@ impl FrameGroup {
         std::hint::black_box(&self.frames);
         std::hint::black_box(&self.free_frames);
         todo!()
+    }
+
+    pub async fn cool(&self) {
+        let mut evictions = Vec::with_capacity(FRAME_GROUP_SIZE);
+
+        for frame in &self.frames {
+            match frame.eviction_state.load(Ordering::Acquire) {
+                TemperatureState::Cold => (),
+                TemperatureState::Cool => evictions.push(frame),
+                TemperatureState::Hot => frame
+                    .eviction_state
+                    .store(TemperatureState::Cool, Ordering::Release),
+            }
+        }
+
+        for eviction_frame in evictions {
+            let page = eviction_frame
+                .owner
+                .load()
+                .deref()
+                .as_ref()
+                .expect("WritePageGuard protects a Frame that does not have an Page Owner");
+
+            todo!()
+        }
     }
 }
