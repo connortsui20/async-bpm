@@ -1,4 +1,3 @@
-use super::eviction::Temperature;
 use crate::{bpm::BufferPoolManager, disk::frame::Frame};
 use derivative::Derivative;
 use std::{fmt::Display, sync::Arc};
@@ -12,14 +11,18 @@ pub const PAGE_SIZE: usize = 1 << 12;
 #[derive(Derivative)]
 #[derivative(Debug, PartialEq, Eq, Hash)]
 pub struct Page {
+    /// The unique ID of this logical page of data.
     pub(crate) pid: PageId,
 
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    pub(crate) eviction_state: Temperature,
-
+    /// An optional pointer to a buffer [`Frame`], protected by a [`RwLock`].
+    ///
+    /// Either a page's data is in a [`Frame`] in memory, or it is only stored on disk / permanent
+    /// storage. In either case, it is protected by a read-write lock to ensure that multiple
+    /// threads and tasks can access the optional frame with proper synchronization.
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) inner: RwLock<Option<Frame>>,
 
+    /// A pointer back to t
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) bpm: Arc<BufferPoolManager>,
 }
@@ -30,6 +33,7 @@ pub type PageRef = Arc<Page>;
 /// A unique identifier for a shared [`Page`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PageId {
+    /// Inner representation subject to change...
     inner: u64,
 }
 
@@ -39,6 +43,8 @@ impl Display for PageId {
     }
 }
 
+/// Implementation of this type subject to change...
+#[allow(missing_docs)]
 impl PageId {
     pub fn new(id: u64) -> Self {
         Self { inner: id }
@@ -57,7 +63,7 @@ impl PageId {
     }
 }
 
-/// We must always be able to convert a `PageId` into a unique 64-bit integer.
+/// A `PageId` must always be convertible into a unique 64-bit integer.
 impl From<PageId> for u64 {
     fn from(value: PageId) -> Self {
         value.as_u64()
