@@ -13,7 +13,7 @@ use libc::O_DIRECT;
 use send_wrapper::SendWrapper;
 use std::{
     fs::{File, OpenOptions},
-    io::IoSlice,
+    io::IoSliceMut,
     ops::Deref,
     os::{fd::AsRawFd, unix::fs::OpenOptionsExt},
     sync::Arc,
@@ -30,7 +30,7 @@ pub struct DiskManager {
     ///
     /// For safety purposes, we cannot ever read from any of these slices, as we should only be
     /// accessing the inner data through [`Frame`]s.
-    register_buffers: Box<[IoSlice<'static>]>,
+    register_buffers: Box<[IoSliceMut<'static>]>,
 
     /// Thread-local `IoUringAsync` instances.
     io_urings: ThreadLocal<SendWrapper<IoUringAsync>>,
@@ -43,7 +43,7 @@ pub struct DiskManager {
 
 impl DiskManager {
     /// Creates a new shared [`DiskManager`] instance.
-    pub fn new(capacity: usize, file_name: String, io_slices: Box<[IoSlice<'static>]>) -> Self {
+    pub fn new(capacity: usize, file_name: String, io_slices: Box<[IoSliceMut<'static>]>) -> Self {
         let file = OpenOptions::new()
             .create(true)
             .read(true)
