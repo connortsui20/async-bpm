@@ -17,9 +17,10 @@ pub struct Temperature {
 pub enum TemperatureState {
     /// Represents a frequently / recently accessed [`Frame`](super::frame::Frame).
     Hot = 2,
-    /// Represents an infrequently or old [`Frame`] that might be evicted soon.
+    /// Represents an infrequently or old [`Frame`](super::frame::Frame) that might be evicted soon.
     Cool = 1,
-    /// Represents a [`Frame`] that does not hold any [`Page`](crate::page::Page)'s data.
+    /// Represents a [`Frame`](super::frame::Frame) that does not hold any
+    /// [`Page`](crate::page::Page)'s data.
     Cold = 0,
 }
 
