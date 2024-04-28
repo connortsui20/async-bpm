@@ -1,3 +1,5 @@
+//! Definitions and types related to logical pages of data.
+
 use crate::{bpm::BufferPoolManager, disk::frame::Frame};
 use derivative::Derivative;
 use std::{fmt::Display, sync::Arc};
