@@ -1,8 +1,9 @@
 //! Wrappers around `tokio`'s `RwLockReadGuard` and `RwLockWriteGuard`, dedicated for pages of data.
 
-use super::PageId;
+use super::{PageId, PAGE_SIZE};
 use crate::disk::{disk_manager::DiskManagerHandle, frame::Frame};
 use std::ops::{Deref, DerefMut};
+use std::slice;
 use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
 use tracing::debug;
 
@@ -59,8 +60,8 @@ impl<'a> Drop for ReadPageGuard<'a> {
 /// access the page's data while a task has this guard.
 pub struct WritePageGuard<'a> {
     pid: PageId,
-    pub(crate) guard: RwLockWriteGuard<'a, Option<Frame>>,
-    pub(crate) dm: DiskManagerHandle,
+    guard: RwLockWriteGuard<'a, Option<Frame>>,
+    dmh: DiskManagerHandle,
 }
 
 impl<'a> WritePageGuard<'a> {
@@ -73,14 +74,14 @@ impl<'a> WritePageGuard<'a> {
     pub(crate) fn new(
         pid: PageId,
         guard: RwLockWriteGuard<'a, Option<Frame>>,
-        dm: DiskManagerHandle,
+        dmh: DiskManagerHandle,
     ) -> Self {
         assert!(
             guard.deref().is_some(),
             "Cannot create a WritePageGuard that does not own a Frame"
         );
 
-        Self { pid, guard, dm }
+        Self { pid, guard, dmh }
     }
 
     /// Flushes a page's data out to disk.
@@ -105,13 +106,20 @@ impl<'a> WritePageGuard<'a> {
 
         // Write the data out to disk
         let frame = self
-            .dm
+            .dmh
             .write_from(pid, frame)
             .await
             .unwrap_or_else(|_| panic!("Was unable to write data from page {} to disk", pid));
 
         // Give ownership back to the guard
         self.guard.replace(frame);
+    }
+
+    /// Evicts the page from memory, consuming the guard in the process.
+    pub(crate) async fn evict(mut self) -> Frame {
+        self.flush().await;
+
+        self.guard.take().unwrap()
     }
 }
 
@@ -128,10 +136,15 @@ impl<'a> Deref for WritePageGuard<'a> {
 
 impl<'a> DerefMut for WritePageGuard<'a> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.guard
-            .deref_mut()
-            .as_mut()
+        let ptr = self
+            .guard
+            .deref()
+            .as_ref()
             .expect("Somehow have a WritePageGuard without an owned frame")
+            .as_ptr() as *mut u8;
+
+        // TODO safety
+        unsafe { slice::from_raw_parts_mut(ptr, PAGE_SIZE) }
     }
 }
 

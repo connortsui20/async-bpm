@@ -2,6 +2,7 @@
 //!
 //! TODO
 
+use crate::disk::disk_manager::DISK_MANAGER;
 use crate::{
     disk::{
         disk_manager::{DiskManager, DiskManagerHandle},
@@ -12,12 +13,19 @@ use crate::{
 use core::slice;
 use rand::Rng;
 use send_wrapper::SendWrapper;
-use std::{collections::HashMap, io::IoSliceMut, rc::Rc, sync::Arc};
+use std::{
+    collections::HashMap,
+    io::IoSliceMut,
+    rc::Rc,
+    sync::{Arc, OnceLock},
+};
 use tokio::{
     runtime::{Builder, Runtime},
     sync::RwLock,
 };
 use tracing::{debug, info, trace};
+
+pub static BPM: OnceLock<BufferPoolManager> = OnceLock::new();
 
 /// A parallel Buffer Pool Manager that manages bringing logical pages from disk into memory via
 /// shared and fixed buffer frames.
@@ -31,9 +39,6 @@ pub struct BufferPoolManager {
 
     /// Groups of frames used to demarcate eviction zones.
     pub(crate) frame_groups: Box<[FrameGroupRef]>,
-
-    /// The manager of reading and writing [`Page`] data via [`Frame`]s.
-    pub(crate) disk_manager: Arc<DiskManager>,
 }
 
 impl BufferPoolManager {
@@ -51,7 +56,8 @@ impl BufferPoolManager {
     /// # Panics
     ///
     /// This function will panic if `num_frames` is not a multiple of [`FRAME_GROUP_SIZE`].
-    pub fn new(num_frames: usize, capacity: usize) -> Self {
+    pub fn initialize(num_frames: usize, capacity: usize) {
+        assert!(BPM.get().is_none());
         assert_eq!(num_frames % FRAME_GROUP_SIZE, 0);
 
         // Allocate all of the buffer memory up front
@@ -103,20 +109,23 @@ impl BufferPoolManager {
             .into_boxed_slice();
         assert_eq!(frame_groups.len(), num_frames / FRAME_GROUP_SIZE);
 
-        let disk_manager = Arc::new(DiskManager::new(
+        // Initialize the global `DiskManager` instance
+        DiskManager::initialize(
             capacity,
             "db.test".to_string(), // TODO replace file name
             registerable_buffers,
-        ));
+        );
 
         let pages = RwLock::new(HashMap::with_capacity(num_frames));
 
-        Self {
+        let bpm = Self {
             num_frames,
             frame_groups,
-            disk_manager,
             pages,
-        }
+        };
+
+        BPM.set(bpm)
+            .expect("Tried to initialize the buffer pool manager more than once");
     }
 
     /// Gets the number of fixed frames the buffer pool manages.
@@ -138,33 +147,32 @@ impl BufferPoolManager {
     /// the logical page data.
     ///
     /// If the page already exists, this function will return that instead.
-    async fn create_page(self: &Arc<Self>, pid: &PageId) -> PageHandle {
+    async fn create_page(&self, pid: &PageId) -> PageHandle {
         info!("Creating {} Handle", pid);
 
         // First check if it exists already
         let mut pages_guard = self.pages.write().await;
         if let Some(page) = pages_guard.get(pid) {
-            return PageHandle::new(page.clone(), self.disk_manager.create_handle());
+            return PageHandle::new(page.clone(), DISK_MANAGER.get().unwrap().create_handle());
         }
 
         // Create the new page and update the global map of pages
         let page = Arc::new(Page {
             pid: *pid,
             inner: RwLock::new(None),
-            bpm: self.clone(),
         });
 
         pages_guard.insert(*pid, page.clone());
 
         // Create the page handle and return
-        PageHandle::new(page, self.disk_manager.create_handle())
+        PageHandle::new(page, DISK_MANAGER.get().unwrap().create_handle())
     }
 
     /// Gets a thread-local page handle of the buffer pool manager, returning a [`PageHandle`] to
     /// the logical page data.
     ///
     /// If the page does not already exist, this function will create it and then return it.
-    pub async fn get_page(self: &Arc<Self>, pid: &PageId) -> PageHandle {
+    pub async fn get_page(&self, pid: &PageId) -> PageHandle {
         debug!("Getting {} Handle", pid);
 
         let pages_guard = self.pages.read().await;
@@ -178,16 +186,16 @@ impl BufferPoolManager {
             }
         };
 
-        PageHandle::new(page, self.disk_manager.create_handle())
+        PageHandle::new(page, DISK_MANAGER.get().unwrap().create_handle())
     }
 
     /// Creates a thread-local [`DiskManagerHandle`] to the inner [`DiskManager`].
     pub fn get_disk_manager(&self) -> DiskManagerHandle {
-        self.disk_manager.create_handle()
+        DISK_MANAGER.get().unwrap().create_handle()
     }
 
     /// TODO
-    pub fn build_thread_runtime(self: &Arc<Self>) -> Runtime {
+    pub fn build_thread_runtime(&self) -> Runtime {
         let dmh = self.get_disk_manager();
         let uring = Rc::new(dmh.get_uring());
         let uring_daemon = SendWrapper::new(uring.clone());

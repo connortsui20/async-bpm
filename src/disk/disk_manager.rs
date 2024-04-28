@@ -16,9 +16,11 @@ use std::{
     io::IoSliceMut,
     ops::Deref,
     os::{fd::AsRawFd, unix::fs::OpenOptionsExt},
-    sync::Arc,
+    sync::OnceLock,
 };
 use thread_local::ThreadLocal;
+
+pub static DISK_MANAGER: OnceLock<DiskManager> = OnceLock::new();
 
 /// Manages reads into and writes from [`Frame`]s between memory and disk.
 #[derive(Debug)]
@@ -43,7 +45,11 @@ pub struct DiskManager {
 
 impl DiskManager {
     /// Creates a new shared [`DiskManager`] instance.
-    pub fn new(capacity: usize, file_name: String, io_slices: Box<[IoSliceMut<'static>]>) -> Self {
+    pub(crate) fn initialize(
+        capacity: usize,
+        file_name: String,
+        io_slices: Box<[IoSliceMut<'static>]>,
+    ) {
         let file = OpenOptions::new()
             .create(true)
             .read(true)
@@ -56,21 +62,22 @@ impl DiskManager {
         file.set_len(file_size as u64)
             .expect("Was unable to change the length of {file_name} to {file_size}");
 
-        Self {
+        let dm = Self {
             register_buffers: io_slices,
             io_urings: ThreadLocal::new(),
             file,
-        }
+        };
+
+        DISK_MANAGER
+            .set(dm)
+            .expect("Tried to initialize the disk pool manager more than once")
     }
 
     /// Creates a thread-local [`DiskManagerHandle`] that has a reference back to this disk manager.
-    pub fn create_handle(self: &Arc<Self>) -> DiskManagerHandle {
+    pub fn create_handle(&self) -> DiskManagerHandle {
         let uring = self.get_thread_local_uring();
 
-        DiskManagerHandle {
-            disk_manager: self.clone(),
-            uring,
-        }
+        DiskManagerHandle { uring }
     }
 
     /// A helper function that either retrieves the already-created thread-local [`IoUringAsync`]
@@ -101,17 +108,16 @@ impl DiskManager {
 /// A thread-local handle to a [`DiskManager`] that contains an inner [`IoUringAsync`] instance.
 #[derive(Debug, Clone)]
 pub struct DiskManagerHandle {
-    disk_manager: Arc<DiskManager>,
     uring: IoUringAsync,
 }
 
 impl DiskManagerHandle {
     /// Reads a page's data into a [`Frame`] from disk.
-    pub async fn read_into(&self, pid: PageId, mut frame: Frame) -> Result<Frame, Frame> {
-        let fd = Fd(self.disk_manager.file.as_raw_fd());
+    pub async fn read_into(&self, pid: PageId, frame: Frame) -> Result<Frame, Frame> {
+        let fd = Fd(DISK_MANAGER.get().unwrap().file.as_raw_fd());
 
         // Since we own the frame (and nobody else is reading from it), this is fine to mutate
-        let buf_ptr = frame.buf.as_mut_ptr();
+        let buf_ptr = frame.buf.as_ptr() as *mut _;
 
         let entry = opcode::Read::new(fd, buf_ptr, PAGE_SIZE as u32)
             .offset(pid.offset())
@@ -131,7 +137,7 @@ impl DiskManagerHandle {
 
     /// Writes a page's data on a [`Frame`] to disk.
     pub async fn write_from(&self, pid: PageId, frame: Frame) -> Result<Frame, Frame> {
-        let fd = Fd(self.disk_manager.file.as_raw_fd());
+        let fd = Fd(DISK_MANAGER.get().unwrap().file.as_raw_fd());
 
         let buf_ptr = frame.buf.as_ptr();
 

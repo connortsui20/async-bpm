@@ -9,8 +9,11 @@
 //! pre-determined groups of frames without having to manage which logical pages are in memory or
 //! not in memory.
 
-use super::eviction::{Temperature, TemperatureState};
-use crate::page::PageRef;
+use super::{
+    disk_manager::DISK_MANAGER,
+    eviction::{Temperature, TemperatureState},
+};
+use crate::page::{PageRef, WritePageGuard};
 use arc_swap::ArcSwapOption;
 use async_channel::{Receiver, Sender};
 use futures::future;
@@ -131,12 +134,22 @@ impl FrameGroup {
             })
             .collect();
 
+        let dmh = DISK_MANAGER.get().unwrap().create_handle();
+
         let futures: Vec<_> = pages
             .iter()
-            .map(|page| async move {
-                let guard = page.inner.try_write();
+            .map(|page| {
+                let dmh = dmh.clone();
 
-                todo!()
+                async move {
+                    if let Ok(guard) = page.inner.try_write() {
+                        let write_guard = WritePageGuard::new(page.pid, guard, dmh);
+
+                        let frame = write_guard.evict().await;
+
+                        self.free_frames.0.send(Arc::new(frame)).await.unwrap();
+                    }
+                }
             })
             .collect();
 

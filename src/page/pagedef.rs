@@ -1,6 +1,6 @@
 //! Definitions and types related to logical pages of data.
 
-use crate::{bpm::BufferPoolManager, disk::frame::Frame};
+use crate::disk::frame::Frame;
 use derivative::Derivative;
 use std::{fmt::Display, sync::Arc};
 use tokio::sync::RwLock;
@@ -23,10 +23,6 @@ pub struct Page {
     /// threads and tasks can access the optional frame with proper synchronization.
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) inner: RwLock<Option<Frame>>,
-
-    /// A pointer back to to the buffer pool manager.
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    pub(crate) bpm: Arc<BufferPoolManager>,
 }
 
 /// A reference-counted reference to a [`Page`].
