@@ -29,7 +29,7 @@ pub struct Page {
     pub(crate) bpm: Arc<BufferPoolManager>,
 }
 
-/// A shared reference to a [`Page`].
+/// A reference-counted reference to a [`Page`].
 pub type PageRef = Arc<Page>;
 
 /// A unique identifier for a shared [`Page`].

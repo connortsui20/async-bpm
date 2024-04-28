@@ -5,7 +5,7 @@
 use crate::{
     disk::{
         disk_manager::{DiskManager, DiskManagerHandle},
-        frame::{Frame, FrameGroup, FRAME_GROUP_SIZE},
+        frame::{Frame, FrameGroup, FrameGroupRef, FrameRef, FRAME_GROUP_SIZE},
     },
     page::{Page, PageHandle, PageId, PageRef, PAGE_SIZE},
 };
@@ -30,7 +30,7 @@ pub struct BufferPoolManager {
     pub(crate) pages: RwLock<HashMap<PageId, PageRef>>,
 
     /// Groups of frames used to demarcate eviction zones.
-    pub(crate) frame_groups: Box<[Arc<FrameGroup>]>,
+    pub(crate) frame_groups: Box<[FrameGroupRef]>,
 
     /// The manager of reading and writing [`Page`] data via [`Frame`]s.
     pub(crate) disk_manager: Arc<DiskManager>,
@@ -80,7 +80,7 @@ impl BufferPoolManager {
         let registerable_buffers = registerable_buffers.into_boxed_slice();
 
         // Create the owned frames that this buffer pool will actually manage
-        let frames: Vec<Arc<Frame>> = buffers
+        let frames: Vec<FrameRef> = buffers
             .into_iter()
             .map(|buf| Arc::new(Frame::new(buf)))
             .collect();
@@ -99,7 +99,7 @@ impl BufferPoolManager {
                     free_frames: async_channel::bounded(FRAME_GROUP_SIZE),
                 })
             })
-            .collect::<Vec<Arc<FrameGroup>>>()
+            .collect::<Vec<FrameGroupRef>>()
             .into_boxed_slice();
         assert_eq!(frame_groups.len(), num_frames / FRAME_GROUP_SIZE);
 
@@ -127,7 +127,7 @@ impl BufferPoolManager {
     /// Returns a pointer to a random group of frames.
     ///
     /// Intended for use by an eviction algorithm.
-    pub(crate) fn get_random_frame_group(&self) -> Arc<FrameGroup> {
+    pub(crate) fn get_random_frame_group(&self) -> FrameGroupRef {
         let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
         let index = rng.gen_range(0..self.frame_groups.len());
 
