@@ -24,7 +24,7 @@ pub struct Page {
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) inner: RwLock<Option<Frame>>,
 
-    /// A pointer back to t
+    /// A pointer back to to the buffer pool manager.
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) bpm: Arc<BufferPoolManager>,
 }
