@@ -1,3 +1,7 @@
+//! This module contains the declaration and implementation of the [`BufferPoolManager`] type.
+//!
+//! TODO
+
 use crate::{
     disk::{
         disk_manager::{DiskManager, DiskManagerHandle},
@@ -6,13 +10,12 @@ use crate::{
     page::{Page, PageHandle, PageId, PageRef, PAGE_SIZE},
 };
 use core::slice;
-use rand::rngs::SmallRng;
-use rand::{Rng, SeedableRng};
+use rand::Rng;
 use send_wrapper::SendWrapper;
-use std::{collections::HashMap, io::IoSliceMut, ops::Deref, rc::Rc, sync::Arc};
+use std::{collections::HashMap, io::IoSliceMut, rc::Rc, sync::Arc};
 use tokio::{
     runtime::{Builder, Runtime},
-    sync::{Mutex, RwLock},
+    sync::RwLock,
 };
 use tracing::{debug, info, trace};
 
@@ -29,19 +32,21 @@ pub struct BufferPoolManager {
     /// Groups of frames used to demarcate eviction zones.
     pub(crate) frame_groups: Box<[Arc<FrameGroup>]>,
 
-    /// The RNG used to pick a random [`FrameGroup`] in the `frame_groups` list.
-    rng: Mutex<SmallRng>,
-
     /// The manager of reading and writing [`Page`] data via [`Frame`]s.
     pub(crate) disk_manager: Arc<DiskManager>,
 }
 
 impl BufferPoolManager {
-    /// Constructs a new buffer pool manager with the given number of `PAGE_SIZE`ed buffer frames.
+    /// Constructs a new buffer pool manager with the given number of [`PAGE_SIZE`]ed buffer frames.
     ///
     /// The argument `capacity` should be the starting number of logical pages the user of the
     /// [`BufferPoolManager`] wishes to use, as it will allocate enough space on disk to initially
     /// accommodate that number.
+    ///
+    /// This function will create two copies of the buffers allocated, 1 copy for user access
+    /// through [`Frame`]s and [`FrameGroup`]s, and another copy for kernel access by registering
+    /// the buffers into the `io_uring` instance via
+    /// [`register_buffers`](io_uring::Submitter::register_buffers).
     ///
     /// # Panics
     ///
@@ -52,53 +57,65 @@ impl BufferPoolManager {
         // Allocate all of the buffer memory up front
         let bytes: &'static mut [u8] = vec![0u8; num_frames * PAGE_SIZE].leak();
 
-        // Note: should use `as_chunks_unchecked_mut()` instead once it is stabilized:
-        // https://doc.rust-lang.org/std/primitive.slice.html#method.as_chunks_unchecked_mut
         let slices: Vec<&'static mut [u8]> = bytes.chunks_exact_mut(PAGE_SIZE).collect();
         assert_eq!(slices.len(), num_frames);
 
-        // Create the vector of `IoSliceMut` buffer pointers
-        let register_buffers = slices
-            .iter()
+        // Create two copies of a vector of `IoSliceMut` buffer pointers
+        let (registerable_buffers, buffers): (Vec<_>, Vec<_>) = slices
+            .into_iter()
             .map(|buf| {
                 // Safety: Since these buffers are only accessed under mutual exclusion and are
                 // never accessed when the kernel has ownership over the `Frames`, this is safe to
                 // create and register into `io_uring` instances.
                 let register_slice =
-                    unsafe { slice::from_raw_parts_mut(buf.deref().as_ptr() as *mut _, PAGE_SIZE) };
+                    unsafe { slice::from_raw_parts_mut(buf.as_mut_ptr(), PAGE_SIZE) };
 
-                IoSliceMut::new(register_slice)
+                (IoSliceMut::new(register_slice), IoSliceMut::new(buf))
             })
-            .collect::<Vec<IoSliceMut<'static>>>()
-            .into_boxed_slice();
+            .collect::<Vec<_>>()
+            .into_iter()
+            .unzip();
 
-        let frame_groups = register_buffers
+        // This copy will only be used to register into the `io_uring` instance, and never accessed
+        let registerable_buffers = registerable_buffers.into_boxed_slice();
+
+        // Create the owned frames that this buffer pool will actually manage
+        let frames: Vec<Arc<Frame>> = buffers
+            .into_iter()
+            .map(|buf| Arc::new(Frame::new(buf)))
+            .collect();
+
+        // Separate the owned frames into fixed-sized groups
+        let frame_groups = frames
             .chunks_exact(FRAME_GROUP_SIZE)
             .map(|chunk| {
                 assert_eq!(chunk.len(), FRAME_GROUP_SIZE);
 
-                let frame_array =
-                    TryInto::<&[IoSliceMut<'static>; FRAME_GROUP_SIZE]>::try_into(chunk).unwrap();
+                // Construct a frame array from the fixed-size slice
+                let frame_array = arrayref::array_ref!(chunk, 0, FRAME_GROUP_SIZE).clone();
 
-                todo!()
+                Arc::new(FrameGroup {
+                    frames: frame_array,
+                    free_frames: async_channel::bounded(FRAME_GROUP_SIZE),
+                })
             })
             .collect::<Vec<Arc<FrameGroup>>>()
             .into_boxed_slice();
-
-        let small_rng = SmallRng::from_entropy();
+        assert_eq!(frame_groups.len(), num_frames / FRAME_GROUP_SIZE);
 
         let disk_manager = Arc::new(DiskManager::new(
             capacity,
-            "db.test".to_string(),
-            register_buffers,
+            "db.test".to_string(), // TODO replace file name
+            registerable_buffers,
         ));
+
+        let pages = RwLock::new(HashMap::with_capacity(num_frames));
 
         Self {
             num_frames,
-            pages: RwLock::new(HashMap::with_capacity(num_frames)),
             frame_groups,
-            rng: Mutex::new(small_rng),
             disk_manager,
+            pages,
         }
     }
 
@@ -110,15 +127,14 @@ impl BufferPoolManager {
     /// Returns a pointer to a random group of frames.
     ///
     /// Intended for use by an eviction algorithm.
-    pub(crate) async fn get_random_frame_group(&self) -> Arc<FrameGroup> {
-        let mut rng_guard = self.rng.lock().await;
-
-        let index = rng_guard.gen_range(0..self.frame_groups.len());
+    pub(crate) fn get_random_frame_group(&self) -> Arc<FrameGroup> {
+        let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
+        let index = rng.gen_range(0..self.frame_groups.len());
 
         self.frame_groups[index].clone()
     }
 
-    /// Creates a thread-local page handle of the buffer pool manager, returning a `PageHandle` to
+    /// Creates a thread-local page handle of the buffer pool manager, returning a [`PageHandle`] to
     /// the logical page data.
     ///
     /// If the page already exists, this function will return that instead.
@@ -144,7 +160,7 @@ impl BufferPoolManager {
         PageHandle::new(page, self.disk_manager.create_handle())
     }
 
-    /// Gets a thread-local page handle of the buffer pool manager, returning a `PageHandle` to
+    /// Gets a thread-local page handle of the buffer pool manager, returning a [`PageHandle`] to
     /// the logical page data.
     ///
     /// If the page does not already exist, this function will create it and then return it.
