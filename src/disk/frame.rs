@@ -13,6 +13,7 @@ use super::eviction::{Temperature, TemperatureState};
 use crate::page::PageRef;
 use arc_swap::ArcSwapOption;
 use async_channel::{Receiver, Sender};
+use futures::future;
 use std::{
     io::IoSliceMut,
     ops::{Deref, DerefMut},
@@ -79,13 +80,13 @@ pub const FRAME_GROUP_SIZE: usize = 64;
 #[derive(Debug)]
 pub struct FrameGroup {
     /// All of the frames in this frame group.
-    pub(crate) frames: [Arc<Frame>; FRAME_GROUP_SIZE],
+    pub(crate) frames: [FrameRef; FRAME_GROUP_SIZE],
 
     /// An asynchronous channel of free frames.
-    pub(crate) free_frames: (Sender<Frame>, Receiver<Frame>),
+    pub(crate) free_frames: (Sender<FrameRef>, Receiver<FrameRef>),
 }
 
-/// A reference-counted reference to a [`Frame`].
+/// A reference-counted reference to a [`FrameGroup`].
 pub type FrameGroupRef = Arc<FrameGroup>;
 
 impl FrameGroup {
@@ -93,10 +94,14 @@ impl FrameGroup {
     ///
     /// This function will evict other frames in this `FrameGroup` if there are no free frames
     /// available.
-    pub async fn get_free_frame(&self) -> Frame {
-        std::hint::black_box(&self.frames);
-        std::hint::black_box(&self.free_frames);
-        todo!()
+    pub async fn get_free_frame(&self) -> FrameRef {
+        loop {
+            if let Ok(frame) = self.free_frames.1.try_recv() {
+                return frame;
+            }
+
+            self.cool().await;
+        }
     }
 
     pub async fn cool(&self) {
@@ -112,15 +117,29 @@ impl FrameGroup {
             }
         }
 
-        for eviction_frame in evictions {
-            let page = eviction_frame
-                .owner
-                .load()
-                .deref()
-                .as_ref()
-                .expect("WritePageGuard protects a Frame that does not have an Page Owner");
+        let pages: Vec<PageRef> = evictions
+            .into_iter()
+            .map(|eviction_frame| {
+                eviction_frame
+                    .owner
+                    .load()
+                    .deref()
+                    .as_ref()
+                    .expect("WritePageGuard protects a Frame that does not have an Page Owner")
+                    .deref()
+                    .clone()
+            })
+            .collect();
 
-            todo!()
-        }
+        let futures: Vec<_> = pages
+            .iter()
+            .map(|page| async move {
+                let guard = page.inner.try_write();
+
+                todo!()
+            })
+            .collect();
+
+        future::join_all(futures).await;
     }
 }
