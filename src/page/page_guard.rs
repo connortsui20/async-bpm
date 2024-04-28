@@ -18,6 +18,12 @@ pub struct ReadPageGuard<'a> {
 }
 
 impl<'a> ReadPageGuard<'a> {
+    /// Creates a new `ReadPageGuard`.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the `RwLockReadGuard` holds a `None` instead of a `Some(frame)`,
+    /// since we cannot have a page guard that points to nothing.
     pub(crate) fn new(pid: PageId, guard: RwLockReadGuard<'a, Option<Frame>>) -> Self {
         assert!(
             guard.deref().is_some(),
@@ -58,6 +64,12 @@ pub struct WritePageGuard<'a> {
 }
 
 impl<'a> WritePageGuard<'a> {
+    /// Creates a new `WritePageGuard`.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the `RwLockWriteGuard` holds a `None` instead of a
+    /// `Some(frame)`, since we cannot have a page guard that points to nothing.
     pub(crate) fn new(
         pid: PageId,
         guard: RwLockWriteGuard<'a, Option<Frame>>,
@@ -71,14 +83,16 @@ impl<'a> WritePageGuard<'a> {
         Self { pid, guard, dm }
     }
 
+    /// Flushes a page's data out to disk.
     pub async fn flush(&mut self) {
         debug!("Flushing {}", self.pid);
 
+        // If there is nothing for us to flush
         if self.guard.is_none() {
-            // There is nothing for us to flush
             return;
         }
 
+        // Temporarily take ownership of the frame from the guard
         let frame = self.guard.take().unwrap();
 
         let pid = frame
@@ -94,8 +108,8 @@ impl<'a> WritePageGuard<'a> {
             .await
             .unwrap_or_else(|_| panic!("Was unable to write data from page {} to disk", pid));
 
-        let res = self.guard.replace(frame);
-        assert!(res.is_none());
+        // Give ownership back to the guard
+        self.guard.replace(frame);
     }
 }
 
