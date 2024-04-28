@@ -102,12 +102,10 @@ impl IoUringAsync {
             submission_queue.sync();
         }
 
-        Op {
-            inner: Some(OpInner {
-                operations: self.operations.clone(),
-                id,
-            }),
-        }
+        Op::new(OpInner {
+            operations: self.operations.clone(),
+            id,
+        })
     }
 
     /// Submit all queued submission queue events to the kernel.
