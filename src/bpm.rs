@@ -6,7 +6,7 @@ use crate::disk::disk_manager::DISK_MANAGER;
 use crate::{
     disk::{
         disk_manager::{DiskManager, DiskManagerHandle},
-        frame::{Frame, FrameGroup, FrameGroupRef, FrameRef, FRAME_GROUP_SIZE},
+        frame::{FrameGroup, FrameGroupRef, FRAME_GROUP_SIZE},
     },
     page::{Page, PageHandle, PageId, PageRef, PAGE_SIZE},
 };
@@ -57,8 +57,12 @@ impl BufferPoolManager {
     ///
     /// This function will panic if `num_frames` is not a multiple of [`FRAME_GROUP_SIZE`].
     pub fn initialize(num_frames: usize, capacity: usize) {
-        assert!(BPM.get().is_none());
+        assert!(
+            BPM.get().is_none(),
+            "Tried to initialize a BufferPoolManager more than once"
+        );
         assert_eq!(num_frames % FRAME_GROUP_SIZE, 0);
+        let num_groups = num_frames / FRAME_GROUP_SIZE;
 
         // Allocate all of the buffer memory up front
         let bytes: &'static mut [u8] = vec![0u8; num_frames * PAGE_SIZE].leak();
@@ -67,7 +71,7 @@ impl BufferPoolManager {
         assert_eq!(slices.len(), num_frames);
 
         // Create two copies of a vector of `IoSliceMut` buffer pointers
-        let (registerable_buffers, buffers): (Vec<_>, Vec<_>) = slices
+        let (mut buffers, registerable_buffers): (Vec<_>, Vec<_>) = slices
             .into_iter()
             .map(|buf| {
                 // Safety: Since these buffers are only accessed under mutual exclusion and are
@@ -76,7 +80,7 @@ impl BufferPoolManager {
                 let register_slice =
                     unsafe { slice::from_raw_parts_mut(buf.as_mut_ptr(), PAGE_SIZE) };
 
-                (IoSliceMut::new(register_slice), IoSliceMut::new(buf))
+                (buf, IoSliceMut::new(register_slice))
             })
             .collect::<Vec<_>>()
             .into_iter()
@@ -85,29 +89,18 @@ impl BufferPoolManager {
         // This copy will only be used to register into the `io_uring` instance, and never accessed
         let registerable_buffers = registerable_buffers.into_boxed_slice();
 
-        // Create the owned frames that this buffer pool will actually manage
-        let frames: Vec<FrameRef> = buffers
-            .into_iter()
-            .map(|buf| Arc::new(Frame::new(buf)))
-            .collect();
-
-        // Separate the owned frames into fixed-sized groups
-        let frame_groups = frames
-            .chunks_exact(FRAME_GROUP_SIZE)
-            .map(|chunk| {
-                assert_eq!(chunk.len(), FRAME_GROUP_SIZE);
-
-                // Construct a frame array from the fixed-size slice
-                let frame_array = arrayref::array_ref!(chunk, 0, FRAME_GROUP_SIZE).clone();
-
-                Arc::new(FrameGroup {
-                    frames: frame_array,
-                    free_frames: async_channel::bounded(FRAME_GROUP_SIZE),
-                })
+        // Create the frame groups, taking the groups of buffers off the back of the buffers vector
+        let frame_groups: Vec<FrameGroupRef> = (0..num_groups)
+            .map(|i| {
+                let buffers: Vec<&'static mut [u8]> = buffers.split_off(FRAME_GROUP_SIZE);
+                FrameGroup::new(buffers, num_groups - i - 1)
             })
-            .collect::<Vec<FrameGroupRef>>()
-            .into_boxed_slice();
+            .collect();
         assert_eq!(frame_groups.len(), num_frames / FRAME_GROUP_SIZE);
+        assert!(
+            buffers.is_empty(),
+            "All buffers should have been moved into frame groups"
+        );
 
         // Initialize the global `DiskManager` instance
         DiskManager::initialize(
@@ -120,7 +113,7 @@ impl BufferPoolManager {
 
         let bpm = Self {
             num_frames,
-            frame_groups,
+            frame_groups: frame_groups.into_boxed_slice(),
             pages,
         };
 
@@ -194,7 +187,8 @@ impl BufferPoolManager {
         DISK_MANAGER.get().unwrap().create_handle()
     }
 
-    /// TODO
+    /// Creates a `tokio` thread-local [`Runtime`] that works with [`IoUringAsync`] by calling
+    /// `submit` and `poll` every time a worker thread gets parked.
     pub fn build_thread_runtime(&self) -> Runtime {
         let dmh = self.get_disk_manager();
         let uring = Rc::new(dmh.get_uring());

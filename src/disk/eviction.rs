@@ -77,8 +77,9 @@ impl EvictionState {
                 None
             }
             FrameTemperature::Cool(page) => {
+                let page = page.clone();
                 *guard = FrameTemperature::Cold;
-                Some(page.clone())
+                Some(page)
             }
             FrameTemperature::Cold => None,
         }

@@ -34,9 +34,6 @@ pub struct Frame {
     group_index: usize,
 }
 
-/// A reference-counted reference to a [`Frame`].
-pub type FrameRef = Arc<Frame>;
-
 impl Frame {
     /// Creates a new and owned [`Frame`].
     fn new(buf: &'static mut [u8], frame_group: Arc<FrameGroup>, group_index: usize) -> Self {
@@ -87,13 +84,13 @@ impl Deref for Frame {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
-        &self.buf
+        self.buf
     }
 }
 
 impl DerefMut for Frame {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.buf
+        self.buf
     }
 }
 
@@ -120,11 +117,15 @@ pub struct FrameGroup {
 pub type FrameGroupRef = Arc<FrameGroup>;
 
 impl FrameGroup {
-    /// Creates a new `FrameGroup` given an iterator of static mutable buffers and an ID.
-    pub fn new(
-        buffers: impl Iterator<Item = &'static mut [u8]>,
-        frame_group_id: usize,
-    ) -> Arc<Self> {
+    /// Creates a new `FrameGroup` given an owned vector of static mutable buffers and an ID.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the length of the input slice `buffers` is not equal to
+    /// [`FRAME_GROUP_SIZE`].
+    pub fn new(buffers: Vec<&'static mut [u8]>, frame_group_id: usize) -> FrameGroupRef {
+        assert_eq!(buffers.len(), FRAME_GROUP_SIZE);
+
         let frame_states: Vec<EvictionState> = (0..FRAME_GROUP_SIZE)
             .map(|_| EvictionState::default())
             .collect();
@@ -136,13 +137,14 @@ impl FrameGroup {
         let frame_group = Arc::new(Self {
             id: frame_group_id,
             frame_states,
-            free_frames: (rx, tx),
+            free_frames: (rx.clone(), tx),
         });
 
         // All free frames should start inside the `free_frames` channel
-        let frames = buffers
+        buffers
+            .into_iter()
             .enumerate()
-            .map(|(i, buf)| Frame::new(buf, frame_group, i))
+            .map(|(i, buf)| Frame::new(buf, frame_group.clone(), i))
             .for_each(|frame| {
                 rx.send_blocking(frame).unwrap();
             });
