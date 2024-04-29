@@ -70,8 +70,13 @@ impl Frame {
     }
 
     /// Returns a reference to the owner of this page, if this `Frame` actually has an owner.
-    pub fn page_owner(&self) -> Option<PageRef> {
-        self.eviction_state().load_owner()
+    pub fn get_page_owner(&self) -> Option<PageRef> {
+        self.eviction_state().get_owner()
+    }
+
+    /// Sets the frame's owner as the given page.
+    pub fn set_page_owner(&self, page: PageRef) {
+        self.eviction_state().set_owner(page)
     }
 
     /// Records an access on the current `Frame`.
@@ -140,7 +145,7 @@ impl FrameGroup {
             free_frames: (rx.clone(), tx),
         });
 
-        // All free frames should start inside the `free_frames` channel
+        // All free frames should start ilet fnside the `free_frames` channel
         buffers
             .into_iter()
             .enumerate()
@@ -159,7 +164,7 @@ impl FrameGroup {
     pub async fn get_free_frame(&self, page: PageRef) -> Frame {
         loop {
             if let Ok(frame) = self.free_frames.1.try_recv() {
-                self.frame_states[frame.group_index].store_owner(page);
+                self.frame_states[frame.group_index].set_owner(page);
                 return frame;
             }
 

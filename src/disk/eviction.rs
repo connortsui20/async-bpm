@@ -52,14 +52,14 @@ impl EvictionState {
 
     /// Atomically sets the temperature as [`FrameTemperature::Hot`] and then stores the page that
     /// owns the [`Frame`](super::frame::Frame) into the state.
-    pub fn store_owner(&self, page: PageRef) {
+    pub fn set_owner(&self, page: PageRef) {
         let mut guard = self.inner.lock().expect("EvictionState mutex was poisoned");
         *guard = FrameTemperature::Hot(page)
     }
 
     /// Atomically loads the [`Page`](crate::page::Page) that owns the
     /// [`Frame`](super::frame::Frame), if an owner exists.
-    pub fn load_owner(&self) -> Option<PageRef> {
+    pub fn get_owner(&self) -> Option<PageRef> {
         let guard = self.inner.lock().expect("EvictionState mutex was poisoned");
         match guard.deref() {
             FrameTemperature::Hot(page) => Some(page.clone()),
