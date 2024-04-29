@@ -1,6 +1,7 @@
 //! Implementation of the `PageHandle` type.
 
 use super::PageRef;
+use crate::bpm::BPM;
 use crate::disk::disk_manager::DiskManagerHandle;
 use crate::disk::frame::Frame;
 use crate::page::page_guard::{ReadPageGuard, WritePageGuard};
@@ -129,122 +130,28 @@ impl PageHandle {
             return;
         }
 
-        todo!()
+        // Randomly choose a `FrameGroup` to place load this page into
+        let bpm = BPM.get().unwrap();
+        let frame_group = bpm.get_random_frame_group();
 
-        // // Wait for a free frame
-        // let frame = self
-        //     .bpm
-        //     .frame_groups
-        //     .get_free_frame()
-        //     .await
-        //     .expect("Free frames channel was unexpectedly closed");
+        // Wait for a free frame
+        let frame = frame_group.get_free_frame(self.page.clone()).await;
+        assert!(frame.get_page_owner().is_none());
 
-        // assert!(frame.owner.is_none());
+        // Read the data in from disk via our disk manager handle
+        let frame = self
+            .dm
+            .read_into(self.page.pid, frame)
+            .await
+            .unwrap_or_else(|_| {
+                panic!(
+                    "Was unable to read data from page {} from disk",
+                    self.page.pid
+                )
+            });
 
-        // // Read the data in from disk via the disk manager
-        // let mut frame = self
-        //     .dm
-        //     .read_into(self.page.pid, frame)
-        //     .await
-        //     .unwrap_or_else(|_| {
-        //         panic!(
-        //             "Was unable to read data from page {} from disk",
-        //             self.page.pid
-        //         )
-        //     });
-
-        // // Make the current page the frame's owner
-        // frame.owner.replace(self.page.clone());
-
-        // // Add to the set of active pages
-        // {
-        //     let mut active_guard = self.bpm.active_pages.lock().await;
-        //     active_guard.insert(self.page.pid);
-        // }
-
-        // // Update the eviction state
-        // self.page
-        //     .eviction_state
-        //     .store(FrameTemperature::Hot, Ordering::Release);
-
-        // let old = guard.replace(frame);
-        // assert!(old.is_none());
+        // Give ownership of the frame to the actual page
+        let old: Option<Frame> = guard.replace(frame);
+        assert!(old.is_none());
     }
-
-    // /// Cools the page, evicting it if it is already cool.
-    // ///
-    // /// This function will "cool" any [`Hot`](FrameTemperature::Hot) [`Page`](super::Page) down to a
-    // /// [`Cool`](FrameTemperature::Cool) [`FrameTemperature`], and it will evict any
-    // /// [`Cool`](FrameTemperature::Cool) [`Page`](super::Page) completely out of memory, which will
-    // /// set the [`FrameTemperature`] down to [`Cold`](FrameTemperature::Cold).
-    // pub(crate) async fn cool(&self) {
-    //     debug!("Cooling {}", self.page.pid);
-
-    //     match self.page.eviction_state.load(Ordering::Acquire) {
-    //         FrameTemperature::Cold => panic!("Found a Cold page in the active list of pages"),
-    //         FrameTemperature::Cool => self.try_evict().await,
-    //         FrameTemperature::Hot => self
-    //             .page
-    //             .eviction_state
-    //             .store(FrameTemperature::Cool, Ordering::Release),
-    //     }
-    // }
-
-    // /// Evicts the page's data, freeing the [`Frame`] that this [`Page`](super::Page) owns, and
-    // /// making the [`Frame`] available for other [`Page`](super::Page)s to use.
-    // pub async fn evict(&self) {
-    //     debug!("Evicting {}", self.page.pid);
-
-    //     let guard = self.write().await;
-
-    //     self.evict_inner(guard).await;
-    // }
-
-    // /// Attempts to grab the write lock. If unsuccessful, this function does nothing. Otherwise,
-    // /// it behaves identically to [`PageHandle::evict`].
-    // pub async fn try_evict(&self) {
-    //     debug!("Try evicting {}", self.page.pid);
-
-    //     if let Some(guard) = self.try_write().await {
-    //         self.evict_inner(guard).await;
-    //     } else {
-    //         warn!("Eviction of {} failed", self.page.pid);
-    //     }
-    // }
-
-    // /// The inner logic for evicting a page's data. See [`PageHandle::evict`] for more information.
-    // async fn evict_inner(&self, mut guard: WritePageGuard<'_>) {
-    //     guard.flush().await;
-
-    //     // Remove from the set of active pages
-    //     {
-    //         let mut active_guard = self.bpm.active_pages.lock().await;
-    //         let remove_res = active_guard.remove(&self.page.pid);
-    //         assert!(
-    //             remove_res,
-    //             "Removed an active page that was somehow not in the active pages set"
-    //         );
-    //     }
-
-    //     let mut frame = guard
-    //         .guard
-    //         .take()
-    //         .expect("WritePageGuard somehow did not have a Frame");
-    //     frame.owner = None;
-
-    //     // Update the eviction state
-    //     self.page
-    //         .eviction_state
-    //         .store(FrameTemperature::Cold, Ordering::Release);
-
-    //     drop(guard);
-
-    //     // Make the Frame available to other pages
-    //     self.bpm
-    //         .free_frames
-    //         .0
-    //         .send(frame)
-    //         .await
-    //         .expect("Free frames channel was unexpectedly closed");
-    // }
 }
