@@ -33,7 +33,7 @@ impl PageHandle {
 
         // If it is already loaded, then we're done
         if let Some(frame) = read_guard.deref() {
-            frame.was_accessed();
+            frame.record_access();
             return ReadPageGuard::new(self.page.pid, read_guard);
         }
 
@@ -58,7 +58,7 @@ impl PageHandle {
 
         // If it is already loaded, then we're done
         if let Some(frame) = read_guard.deref() {
-            frame.was_accessed();
+            frame.record_access();
             return Some(ReadPageGuard::new(self.page.pid, read_guard));
         }
 
@@ -79,7 +79,7 @@ impl PageHandle {
 
         // If it is already loaded, then we're done
         if let Some(frame) = write_guard.deref() {
-            frame.was_accessed();
+            frame.record_access();
             return WritePageGuard::new(self.page.pid, write_guard, self.dm.clone());
         }
 
@@ -101,7 +101,7 @@ impl PageHandle {
 
         // If it is already loaded, then we're done
         if let Some(frame) = write_guard.deref() {
-            frame.was_accessed();
+            frame.record_access();
             return Some(WritePageGuard::new(
                 self.page.pid,
                 write_guard,
@@ -125,7 +125,7 @@ impl PageHandle {
 
         // If someone else got in front of us and loaded the page for us
         if let Some(frame) = guard.deref().deref() {
-            frame.was_accessed();
+            frame.record_access();
             return;
         }
 
@@ -165,7 +165,7 @@ impl PageHandle {
         // // Update the eviction state
         // self.page
         //     .eviction_state
-        //     .store(TemperatureState::Hot, Ordering::Release);
+        //     .store(FrameTemperature::Hot, Ordering::Release);
 
         // let old = guard.replace(frame);
         // assert!(old.is_none());
@@ -173,20 +173,20 @@ impl PageHandle {
 
     // /// Cools the page, evicting it if it is already cool.
     // ///
-    // /// This function will "cool" any [`Hot`](TemperatureState::Hot) [`Page`](super::Page) down to a
-    // /// [`Cool`](TemperatureState::Cool) [`TemperatureState`], and it will evict any
-    // /// [`Cool`](TemperatureState::Cool) [`Page`](super::Page) completely out of memory, which will
-    // /// set the [`TemperatureState`] down to [`Cold`](TemperatureState::Cold).
+    // /// This function will "cool" any [`Hot`](FrameTemperature::Hot) [`Page`](super::Page) down to a
+    // /// [`Cool`](FrameTemperature::Cool) [`FrameTemperature`], and it will evict any
+    // /// [`Cool`](FrameTemperature::Cool) [`Page`](super::Page) completely out of memory, which will
+    // /// set the [`FrameTemperature`] down to [`Cold`](FrameTemperature::Cold).
     // pub(crate) async fn cool(&self) {
     //     debug!("Cooling {}", self.page.pid);
 
     //     match self.page.eviction_state.load(Ordering::Acquire) {
-    //         TemperatureState::Cold => panic!("Found a Cold page in the active list of pages"),
-    //         TemperatureState::Cool => self.try_evict().await,
-    //         TemperatureState::Hot => self
+    //         FrameTemperature::Cold => panic!("Found a Cold page in the active list of pages"),
+    //         FrameTemperature::Cool => self.try_evict().await,
+    //         FrameTemperature::Hot => self
     //             .page
     //             .eviction_state
-    //             .store(TemperatureState::Cool, Ordering::Release),
+    //             .store(FrameTemperature::Cool, Ordering::Release),
     //     }
     // }
 
@@ -235,7 +235,7 @@ impl PageHandle {
     //     // Update the eviction state
     //     self.page
     //         .eviction_state
-    //         .store(TemperatureState::Cold, Ordering::Release);
+    //         .store(FrameTemperature::Cold, Ordering::Release);
 
     //     drop(guard);
 

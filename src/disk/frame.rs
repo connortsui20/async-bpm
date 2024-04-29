@@ -9,7 +9,7 @@
 //! pre-determined groups of frames without having to manage which logical pages are in memory or
 //! not in memory.
 
-use super::{disk_manager::DISK_MANAGER, eviction::FrameTemperature};
+use super::{disk_manager::DISK_MANAGER, eviction::EvictionState};
 use crate::page::{PageRef, WritePageGuard, PAGE_SIZE};
 use async_channel::{Receiver, Sender};
 use futures::future;
@@ -68,9 +68,18 @@ impl Frame {
         self.buf.as_mut_ptr()
     }
 
+    pub(crate) fn eviction_state(&self) -> &EvictionState {
+        &self.frame_group.frame_states[self.group_index]
+    }
+
     /// Returns a reference to the owner of this page, if this `Frame` actually has an owner.
-    pub(crate) fn get_page_owner(&self) -> Option<PageRef> {
-        self.frame_group.frame_states[self.group_index].load_owner()
+    pub(crate) fn page_owner(&self) -> Option<PageRef> {
+        self.eviction_state().load_owner()
+    }
+
+    /// Records an access on the current `Frame`.
+    pub(crate) fn record_access(&self) {
+        self.eviction_state().record_access()
     }
 }
 
@@ -101,7 +110,7 @@ pub struct FrameGroup {
     id: usize,
 
     /// The states of the [`Frame`]s that belong to this `FrameGroup`.
-    frame_states: Box<[FrameTemperature]>,
+    frame_states: Box<[EvictionState]>,
 
     /// An asynchronous channel of free [`Frame`]s.
     free_frames: (Sender<Frame>, Receiver<Frame>),
@@ -116,8 +125,8 @@ impl FrameGroup {
         buffers: impl Iterator<Item = &'static mut [u8]>,
         frame_group_id: usize,
     ) -> Arc<Self> {
-        let frame_states: Vec<FrameTemperature> = (0..FRAME_GROUP_SIZE)
-            .map(|_| FrameTemperature::default())
+        let frame_states: Vec<EvictionState> = (0..FRAME_GROUP_SIZE)
+            .map(|_| EvictionState::default())
             .collect();
         let frame_states = frame_states.into_boxed_slice();
         assert_eq!(frame_states.len(), FRAME_GROUP_SIZE);
