@@ -79,6 +79,10 @@ impl Frame {
         self.eviction_state().set_owner(page)
     }
 
+    pub fn evict_page_owner(&self) -> Option<PageRef> {
+        self.eviction_state().evict()
+    }
+
     /// Records an access on the current `Frame`.
     pub fn record_access(&self) {
         self.eviction_state().record_access()

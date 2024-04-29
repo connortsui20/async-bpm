@@ -116,7 +116,10 @@ impl<'a> WritePageGuard<'a> {
     pub(crate) async fn evict(mut self) -> Frame {
         self.flush().await;
 
-        self.guard.take().unwrap()
+        let frame = self.guard.take().unwrap();
+        frame.evict_page_owner().unwrap();
+
+        frame
     }
 }
 

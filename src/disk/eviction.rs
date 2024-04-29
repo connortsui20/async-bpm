@@ -68,7 +68,14 @@ impl EvictionState {
         }
     }
 
-    /// Runs the cooling algorithm, returning a [`PageRef`] if we want to evict the page.
+    /// Atomically runs the cooling algorithm, returning a [`PageRef`] if we want to evict the page.
+    ///
+    /// If the state is [`Hot`](FrameTemperature::Hot), then this function cools it down to be
+    /// [`Cool`](FrameTemperature::Cool), and if it was already [`Cool`](FrameTemperature::Cool),
+    /// then this function will cool it down further to [`Cold`](FrameTemperature::Cold).
+    ///
+    /// If the state transitions to [`Cold`](FrameTemperature::Cold), this function will return the
+    /// [`PageRef`] that it used to hold.
     pub fn cool(&self) -> Option<PageRef> {
         let mut guard = self.inner.lock().expect("EvictionState mutex was poisoned");
 
@@ -76,6 +83,26 @@ impl EvictionState {
             FrameTemperature::Hot(page) => {
                 *guard = FrameTemperature::Cool(page.clone());
                 None
+            }
+            FrameTemperature::Cool(page) => {
+                let page = page.clone();
+                *guard = FrameTemperature::Cold;
+                Some(page)
+            }
+            FrameTemperature::Cold => None,
+        }
+    }
+
+    /// Atomically cools down the eviction state all the way to [`Cold`](FrameTemperature::Cold),
+    /// returning the owning [`PageRef`] if it wasn't already [`Cold`](FrameTemperature::Cold).
+    pub fn evict(&self) -> Option<PageRef> {
+        let mut guard = self.inner.lock().expect("EvictionState mutex was poisoned");
+
+        match guard.deref() {
+            FrameTemperature::Hot(page) => {
+                let page = page.clone();
+                *guard = FrameTemperature::Cold;
+                Some(page)
             }
             FrameTemperature::Cool(page) => {
                 let page = page.clone();
