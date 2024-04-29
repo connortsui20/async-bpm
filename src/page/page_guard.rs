@@ -115,7 +115,7 @@ impl<'a> WritePageGuard<'a> {
         self.flush().await;
 
         let frame = self.guard.take().unwrap();
-        frame.evict_page_owner().unwrap();
+        frame.evict_page_owner().await.unwrap();
 
         debug!("Finished evicting page {}", self.pid);
 
