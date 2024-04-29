@@ -7,7 +7,7 @@ use std::slice;
 use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
 use tracing::debug;
 
-/// A read guard for a [`Page`](super::Page)'s [`Frame`], which pins the page's data in memory.
+/// A read guard for a [`Page`](super::Page)'s `Frame`, which pins the page's data in memory.
 ///
 /// When this guard is dereferenced, it is guaranteed to point to valid and correct page data.
 ///
@@ -52,7 +52,7 @@ impl<'a> Drop for ReadPageGuard<'a> {
     }
 }
 
-/// A write guard for a [`Page`](super::Page)'s [`Frame`], which pins the page's data in memory.
+/// A write guard for a [`Page`](super::Page)'s `Frame`, which pins the page's data in memory.
 ///
 /// When this guard is dereferenced, it is guaranteed to point to valid and correct page data.
 ///

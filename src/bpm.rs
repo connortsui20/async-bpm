@@ -49,13 +49,13 @@ impl BufferPoolManager {
     /// accommodate that number.
     ///
     /// This function will create two copies of the buffers allocated, 1 copy for user access
-    /// through [`Frame`]s and [`FrameGroup`]s, and another copy for kernel access by registering
+    /// through `Frame`s and `FrameGroup`s, and another copy for kernel access by registering
     /// the buffers into the `io_uring` instance via
     /// [`register_buffers`](io_uring::Submitter::register_buffers).
     ///
     /// # Panics
     ///
-    /// This function will panic if `num_frames` is not a multiple of [`FRAME_GROUP_SIZE`].
+    /// This function will panic if `num_frames` is not a multiple of [`FRAME_GROUP_SIZE`]((crate::disk::frame::FRAME_GROUP_SIZE)).
     pub fn initialize(num_frames: usize, capacity: usize) {
         assert!(
             BPM.get().is_none(),
@@ -187,8 +187,9 @@ impl BufferPoolManager {
         DISK_MANAGER.get().unwrap().create_handle()
     }
 
-    /// Creates a `tokio` thread-local [`Runtime`] that works with [`IoUringAsync`] by calling
-    /// `submit` and `poll` every time a worker thread gets parked.
+    /// Creates a `tokio` thread-local [`Runtime`] that works with
+    /// [`IoUringAsync`](crate::io::IoUringAsync) by calling `submit` and `poll` every time a worker
+    /// thread gets parked.
     pub fn build_thread_runtime(&self) -> Runtime {
         let dmh = self.get_disk_manager();
         let uring = Rc::new(dmh.get_uring());

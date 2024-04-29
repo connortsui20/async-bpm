@@ -22,7 +22,7 @@ use thread_local::ThreadLocal;
 
 pub static DISK_MANAGER: OnceLock<DiskManager> = OnceLock::new();
 
-/// Manages reads into and writes from [`Frame`]s between memory and disk.
+/// Manages reads into and writes from `Frame`s between memory and disk.
 #[derive(Debug)]
 pub struct DiskManager {
     /// A slice of buffers, used solely to register into new [`IoUringAsync`] instances.
@@ -107,7 +107,7 @@ pub struct DiskManagerHandle {
 }
 
 impl DiskManagerHandle {
-    /// Reads a page's data into a [`Frame`] from disk.
+    /// Reads a page's data into a `Frame` from disk.
     pub async fn read_into(&self, pid: PageId, mut frame: Frame) -> Result<Frame, Frame> {
         let fd = Fd(DISK_MANAGER.get().unwrap().file.as_raw_fd());
 
@@ -130,7 +130,7 @@ impl DiskManagerHandle {
         }
     }
 
-    /// Writes a page's data on a [`Frame`] to disk.
+    /// Writes a page's data on a `Frame` to disk.
     pub async fn write_from(&self, pid: PageId, frame: Frame) -> Result<Frame, Frame> {
         let fd = Fd(DISK_MANAGER.get().unwrap().file.as_raw_fd());
 

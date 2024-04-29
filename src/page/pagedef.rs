@@ -5,7 +5,7 @@ use derivative::Derivative;
 use std::{fmt::Display, sync::Arc};
 use tokio::sync::RwLock;
 
-/// The size of a buffer [`Frame`] / logical [`Page`] of data.
+/// The size of a buffer `Frame` / logical [`Page`] of data.
 pub const PAGE_SIZE: usize = 1 << 12;
 
 /// A shared logical [`Page`] object. All access should be done through a

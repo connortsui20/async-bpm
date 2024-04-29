@@ -14,9 +14,9 @@ pub struct EvictionState {
     pub inner: Mutex<FrameTemperature>,
 }
 
-/// The enum representing the possible values for [`Temperature`].
+/// The enum representing the possible values for [`EvictionState`].
 ///
-/// The reason this is separate from the [`Temperature`] struct is because we cannot represent do
+/// The reason this is separate from the [`EvictionState`] struct is because we cannot represent do
 /// atomic operations on enums in Rust.
 #[derive(Debug)]
 pub enum FrameTemperature {
@@ -57,7 +57,8 @@ impl EvictionState {
         *guard = FrameTemperature::Hot(page)
     }
 
-    /// Atomically loads the [`Page`] that owns the [`Frame`](super::frame::Frame), if that exists.
+    /// Atomically loads the [`Page`](crate::page::Page) that owns the
+    /// [`Frame`](super::frame::Frame), if an owner exists.
     pub fn load_owner(&self) -> Option<PageRef> {
         let guard = self.inner.lock().expect("EvictionState mutex was poisoned");
         match guard.deref() {
