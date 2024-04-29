@@ -20,6 +20,7 @@ use std::{
 };
 use thread_local::ThreadLocal;
 
+/// The global disk manager instance.
 pub static DISK_MANAGER: OnceLock<DiskManager> = OnceLock::new();
 
 /// Manages reads into and writes from `Frame`s between memory and disk.

@@ -25,6 +25,7 @@ use tokio::{
 };
 use tracing::{debug, info, trace};
 
+/// The global buffer pool manager instance.
 pub static BPM: OnceLock<BufferPoolManager> = OnceLock::new();
 
 /// A parallel Buffer Pool Manager that manages bringing logical pages from disk into memory via
