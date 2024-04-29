@@ -30,8 +30,8 @@ pub struct Frame {
     /// the mutable buffer.
     buf: &'static mut [u8],
 
-    /// The group ID of the frame group that this `Frame` belongs to.
-    frame_group_id: usize,
+    /// A pointer to the [`FrameGroup`] that this `Frame` belongs to.
+    frame_group: Arc<FrameGroup>,
 
     /// The index of the frame group that refers to this `Frame`.
     group_index: usize,
@@ -42,18 +42,18 @@ pub type FrameRef = Arc<Frame>;
 
 impl Frame {
     /// Creates a new and owned [`Frame`].
-    fn new(buf: &'static mut [u8], frame_group_id: usize, group_index: usize) -> Self {
+    fn new(buf: &'static mut [u8], frame_group: Arc<FrameGroup>, group_index: usize) -> Self {
         assert_eq!(buf.len(), PAGE_SIZE);
         Self {
             buf,
-            frame_group_id,
+            frame_group,
             group_index,
         }
     }
 
     /// Gets the frame group ID.
     pub(crate) fn frame_group_id(&self) -> usize {
-        self.frame_group_id
+        self.frame_group.id
     }
 
     /// Gets the index of the frame group that refers to this `Frame`.
@@ -95,11 +95,14 @@ pub const FRAME_GROUP_SIZE: usize = 64;
 /// algorithm over.
 #[derive(Debug)]
 pub struct FrameGroup {
+    /// The unique group ID of this `FrameGroup`.
+    id: usize,
+
     /// The states of the [`Frame`]s that belong to this `FrameGroup`.
-    pub(crate) frame_states: Box<[FrameTemperature]>,
+    frame_states: Box<[FrameTemperature]>,
 
     /// An asynchronous channel of free [`Frame`]s.
-    pub(crate) free_frames: (Sender<Frame>, Receiver<Frame>),
+    free_frames: (Sender<Frame>, Receiver<Frame>),
 }
 
 /// A reference-counted reference to a [`FrameGroup`].
@@ -107,26 +110,33 @@ pub type FrameGroupRef = Arc<FrameGroup>;
 
 impl FrameGroup {
     /// Creates a new `FrameGroup` given an iterator of static mutable buffers and an ID.
-    pub fn new(buffers: impl Iterator<Item = &'static mut [u8]>, frame_group_id: usize) -> Self {
-        let (rx, tx) = async_channel::bounded(FRAME_GROUP_SIZE);
-
-        let frames = buffers
-            .enumerate()
-            .map(|(i, buf)| Frame::new(buf, frame_group_id, i))
-            .for_each(|frame| {
-                rx.send_blocking(frame).unwrap();
-            });
-
+    pub fn new(
+        buffers: impl Iterator<Item = &'static mut [u8]>,
+        frame_group_id: usize,
+    ) -> Arc<Self> {
         let frame_states: Vec<FrameTemperature> = (0..FRAME_GROUP_SIZE)
             .map(|_| FrameTemperature::default())
             .collect();
         let frame_states = frame_states.into_boxed_slice();
         assert_eq!(frame_states.len(), FRAME_GROUP_SIZE);
 
-        Self {
+        let (rx, tx) = async_channel::bounded(FRAME_GROUP_SIZE);
+
+        let frame_group = Arc::new(Self {
+            id: frame_group_id,
             frame_states,
             free_frames: (rx, tx),
-        }
+        });
+
+        // All free frames should start inside the `free_frames` channel
+        let frames = buffers
+            .enumerate()
+            .map(|(i, buf)| Frame::new(buf, frame_group, i))
+            .for_each(|frame| {
+                rx.send_blocking(frame).unwrap();
+            });
+
+        frame_group
     }
 
     /// Gets a free frame in this `FrameGroup`.
