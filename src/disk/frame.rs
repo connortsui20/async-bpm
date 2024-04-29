@@ -17,7 +17,6 @@ use std::{
     ops::{Deref, DerefMut},
     sync::Arc,
 };
-use tracing::debug;
 
 /// An owned buffer frame, intended to be shared between user and kernel space.
 #[derive(Debug)]

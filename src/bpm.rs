@@ -23,7 +23,6 @@ use tokio::{
     runtime::{Builder, Runtime},
     sync::RwLock,
 };
-use tracing::{debug, info, trace};
 
 /// The global buffer pool manager instance.
 pub static BPM: OnceLock<BufferPoolManager> = OnceLock::new();

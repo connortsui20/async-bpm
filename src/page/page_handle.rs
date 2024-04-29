@@ -8,7 +8,6 @@ use crate::page::page_guard::{ReadPageGuard, WritePageGuard};
 use derivative::Derivative;
 use std::ops::Deref;
 use tokio::sync::RwLockWriteGuard;
-use tracing::{debug, warn};
 
 /// A thread-local handle to a logical page of data.
 #[derive(Derivative)]

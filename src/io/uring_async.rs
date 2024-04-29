@@ -12,7 +12,7 @@ use std::{
     rc::Rc,
 };
 use tokio::io::unix::AsyncFd;
-use tracing::{trace, warn};
+use tracing::warn;
 
 /// The default number of `io_uring` submission entries.
 pub const IO_URING_DEFAULT_ENTRIES: u16 = 1 << 12; // 4096

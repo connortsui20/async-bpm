@@ -4,7 +4,6 @@ use super::PageId;
 use crate::disk::{disk_manager::DiskManagerHandle, frame::Frame};
 use std::ops::{Deref, DerefMut};
 use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
-use tracing::debug;
 
 /// A read guard for a [`Page`](super::Page)'s `Frame`, which pins the page's data in memory.
 ///
