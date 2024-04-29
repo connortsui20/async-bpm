@@ -1,6 +1,6 @@
 #![cfg(target_family = "unix")]
 
 pub mod bpm;
-pub mod disk;
-pub mod io;
+pub(crate) mod disk;
+pub(crate) mod io;
 pub mod page;

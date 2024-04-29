@@ -49,36 +49,36 @@ impl Frame {
     }
 
     /// Gets the frame group ID.
-    pub(crate) fn frame_group_id(&self) -> usize {
+    pub fn frame_group_id(&self) -> usize {
         self.frame_group.id
     }
 
     /// Gets the index of the frame group that refers to this `Frame`.
-    pub(crate) fn group_index(&self) -> usize {
+    pub fn group_index(&self) -> usize {
         self.group_index
     }
 
     /// Returns a raw pointer to this frame's buffer.
-    pub(crate) fn as_ptr(&self) -> *const u8 {
+    pub fn as_ptr(&self) -> *const u8 {
         self.buf.as_ptr()
     }
 
     /// Returns a mutable pointer to this frame's buffer.
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut u8 {
+    pub fn as_mut_ptr(&mut self) -> *mut u8 {
         self.buf.as_mut_ptr()
     }
 
-    pub(crate) fn eviction_state(&self) -> &EvictionState {
+    pub fn eviction_state(&self) -> &EvictionState {
         &self.frame_group.frame_states[self.group_index]
     }
 
     /// Returns a reference to the owner of this page, if this `Frame` actually has an owner.
-    pub(crate) fn page_owner(&self) -> Option<PageRef> {
+    pub fn page_owner(&self) -> Option<PageRef> {
         self.eviction_state().load_owner()
     }
 
     /// Records an access on the current `Frame`.
-    pub(crate) fn record_access(&self) {
+    pub fn record_access(&self) {
         self.eviction_state().record_access()
     }
 }

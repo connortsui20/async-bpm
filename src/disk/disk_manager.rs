@@ -43,11 +43,7 @@ pub struct DiskManager {
 
 impl DiskManager {
     /// Creates a new shared [`DiskManager`] instance.
-    pub(crate) fn initialize(
-        capacity: usize,
-        file_name: String,
-        io_slices: Box<[IoSliceMut<'static>]>,
-    ) {
+    pub fn initialize(capacity: usize, file_name: String, io_slices: Box<[IoSliceMut<'static>]>) {
         let file = OpenOptions::new()
             .create(true)
             .read(true)
