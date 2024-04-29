@@ -86,6 +86,7 @@ impl BufferPoolManager {
             .collect::<Vec<_>>()
             .into_iter()
             .unzip();
+        assert_eq!(buffers.len(), num_frames);
 
         // This copy will only be used to register into the `io_uring` instance, and never accessed
         let registerable_buffers = registerable_buffers.into_boxed_slice();
@@ -93,7 +94,10 @@ impl BufferPoolManager {
         // Create the frame groups, taking the groups of buffers off the back of the buffers vector
         let frame_groups: Vec<FrameGroupRef> = (0..num_groups)
             .map(|i| {
-                let buffers: Vec<&'static mut [u8]> = buffers.split_off(FRAME_GROUP_SIZE);
+                let buffers: Vec<&'static mut [u8]> =
+                    buffers.split_off(buffers.len() - FRAME_GROUP_SIZE);
+                assert_eq!(buffers.len(), FRAME_GROUP_SIZE, "Not equal at index {i}");
+
                 FrameGroup::new(buffers, num_groups - i - 1)
             })
             .collect();

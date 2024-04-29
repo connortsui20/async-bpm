@@ -22,14 +22,14 @@ fn test_bpm_threads() {
         .with_thread_ids(true)
         .with_target(false)
         .without_time()
-        .with_max_level(Level::WARN)
+        .with_max_level(Level::TRACE)
         .with_writer(Mutex::new(log_file))
         .finish();
     tracing::subscriber::set_global_default(stdout_subscriber).unwrap();
 
     const THREADS: usize = 96;
 
-    BufferPoolManager::initialize(2, THREADS * 2);
+    BufferPoolManager::initialize(64, THREADS * 2);
 
     let bpm = BPM.get().unwrap();
 
