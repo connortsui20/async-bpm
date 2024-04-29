@@ -28,8 +28,6 @@ impl PageHandle {
 
     /// Gets a read guard on a logical page, which guarantees the data is in memory.
     pub async fn read(&self) -> ReadPageGuard {
-        debug!("Read locking {}", self.page.pid);
-
         let read_guard = self.page.inner.read().await;
 
         // If it is already loaded, then we're done
@@ -50,10 +48,7 @@ impl PageHandle {
     /// Attempts to grab the read lock. If unsuccessful, this function does nothing. Otherwise, this
     /// function behaves identically to [`PageHandle::read`].
     pub async fn try_read(&self) -> Option<ReadPageGuard> {
-        debug!("Try read locking {}", self.page.pid);
-
         let Ok(read_guard) = self.page.inner.try_read() else {
-            warn!("Try read {} failed", self.page.pid);
             return None;
         };
 
@@ -74,8 +69,6 @@ impl PageHandle {
 
     /// Gets a write guard on a logical page, which guarantees the data is in memory.
     pub async fn write(&self) -> WritePageGuard {
-        debug!("Write locking {}", self.page.pid);
-
         let mut write_guard = self.page.inner.write().await;
 
         // If it is already loaded, then we're done
@@ -93,10 +86,7 @@ impl PageHandle {
     /// Attempts to grab the write lock. If unsuccessful, this function does nothing. Otherwise,
     /// this function behaves identically to [`PageHandle::write`].
     pub async fn try_write(&self) -> Option<WritePageGuard> {
-        debug!("Try write locking {}", self.page.pid);
-
         let Ok(mut write_guard) = self.page.inner.try_write() else {
-            warn!("Try write {} failed", self.page.pid);
             return None;
         };
 
@@ -122,8 +112,6 @@ impl PageHandle {
 
     /// Loads page data from disk into a frame in memory.
     async fn load(&self, guard: &mut RwLockWriteGuard<'_, Option<Frame>>) {
-        debug!("Loading {} from disk", self.page.pid);
-
         // If someone else got in front of us and loaded the page for us
         if let Some(frame) = guard.deref().deref() {
             frame.record_access().await;

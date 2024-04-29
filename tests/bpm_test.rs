@@ -27,9 +27,9 @@ fn test_bpm_threads() {
         .finish();
     tracing::subscriber::set_global_default(stdout_subscriber).unwrap();
 
-    const THREADS: usize = 96;
+    const THREADS: usize = 8;
 
-    BufferPoolManager::initialize(64, THREADS * 2);
+    BufferPoolManager::initialize(4, THREADS * 2);
 
     let bpm = BPM.get().unwrap();
 
@@ -44,12 +44,11 @@ fn test_bpm_threads() {
                     let pid = PageId::new(i as u64);
                     let ph = bpm.get_page(&pid).await;
 
-                    let mut guard = ph.write().await;
-
-                    guard.deref_mut().fill(b' ' + i as u8);
-                    guard.flush().await;
-
-                    drop(guard);
+                    {
+                        let mut guard = ph.write().await;
+                        guard.deref_mut().fill(b' ' + i as u8);
+                        guard.flush().await;
+                    }
 
                     #[allow(clippy::empty_loop)]
                     loop {}

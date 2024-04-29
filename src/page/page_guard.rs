@@ -45,12 +45,6 @@ impl<'a> Deref for ReadPageGuard<'a> {
     }
 }
 
-impl<'a> Drop for ReadPageGuard<'a> {
-    fn drop(&mut self) {
-        debug!("Dropping ReadPageGuard {}", self.pid);
-    }
-}
-
 /// A write guard for a [`Page`](super::Page)'s `Frame`, which pins the page's data in memory.
 ///
 /// When this guard is dereferenced, it is guaranteed to point to valid and correct page data.
@@ -85,14 +79,10 @@ impl<'a> WritePageGuard<'a> {
 
     /// Flushes a page's data out to disk.
     pub async fn flush(&mut self) {
-        debug!("Flushing {}", self.pid);
-
         assert!(self.guard.is_some());
 
         // Temporarily take ownership of the frame from the guard
         let frame = self.guard.take().unwrap();
-
-        debug!("About to write out {} to disk", self.pid);
 
         // Write the data out to disk
         let frame = self
@@ -100,8 +90,6 @@ impl<'a> WritePageGuard<'a> {
             .write_from(self.pid, frame)
             .await
             .unwrap_or_else(|_| panic!("Was unable to write data from page {} to disk", self.pid));
-
-        debug!("Wrote {} to disk", self.pid);
 
         // Give ownership back to the guard
         self.guard.replace(frame);
@@ -111,13 +99,10 @@ impl<'a> WritePageGuard<'a> {
     pub(crate) async fn evict(mut self) -> Frame {
         assert!(self.guard.is_some());
 
-        debug!("Flushing in evict");
         self.flush().await;
 
         let frame = self.guard.take().unwrap();
         frame.evict_page_owner().await.unwrap();
-
-        debug!("Finished evicting page {}", self.pid);
 
         frame
     }
@@ -140,11 +125,5 @@ impl<'a> DerefMut for WritePageGuard<'a> {
             .deref_mut()
             .as_mut()
             .expect("Somehow have a WritePageGuard without an owned frame")
-    }
-}
-
-impl<'a> Drop for WritePageGuard<'a> {
-    fn drop(&mut self) {
-        debug!("Dropping WritePageGuard {}", self.pid);
     }
 }

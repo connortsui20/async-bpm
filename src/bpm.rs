@@ -146,8 +146,6 @@ impl BufferPoolManager {
     ///
     /// If the page already exists, this function will return that instead.
     async fn create_page(&self, pid: &PageId) -> PageHandle {
-        info!("Creating {} Handle", pid);
-
         // First check if it exists already
         let mut pages_guard = self.pages.write().await;
         if let Some(page) = pages_guard.get(pid) {
@@ -171,8 +169,6 @@ impl BufferPoolManager {
     ///
     /// If the page does not already exist, this function will create it and then return it.
     pub async fn get_page(&self, pid: &PageId) -> PageHandle {
-        debug!("Getting {} Handle", pid);
-
         let pages_guard = self.pages.read().await;
 
         // Get the page if it exists, otherwise create it and return
@@ -202,7 +198,6 @@ impl BufferPoolManager {
 
         Builder::new_current_thread()
             .on_thread_park(move || {
-                trace!("Thread parking");
                 uring_daemon
                     .submit()
                     .expect("Was unable to submit `io_uring` operations");

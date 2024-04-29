@@ -57,7 +57,6 @@ impl IoUringAsync {
 
         loop {
             let mut guard = async_fd.readable().await.unwrap();
-            trace!("IoUringAsync listener woke up");
 
             guard.get_inner().poll();
             guard.clear_ready();
@@ -79,8 +78,6 @@ impl IoUringAsync {
     /// [`SubmissionQueue::push`](io_uring::SubmissionQueue::push).
     pub unsafe fn push(&self, entry: SqEntry) -> Op {
         let id = entry.get_user_data();
-
-        trace!("Pushing operation {id} onto IoUringAsync");
 
         let mut operations_guard = self.operations.borrow_mut();
 
@@ -117,7 +114,6 @@ impl IoUringAsync {
     /// Ideally, this function should be called on the [`IoUringAsync`] instance every time a worker
     /// thread parks. For example, call `submit` from [`tokio::runtime::Builder::on_thread_park`].
     pub fn submit(&self) -> std::io::Result<usize> {
-        trace!("Submitting operations");
         self.uring.borrow().submit()
     }
 
@@ -130,8 +126,6 @@ impl IoUringAsync {
     /// [`IoUringAsync::push`] to observe the result of the operation, as well as remove it from the
     /// `HashMap` of current in-flight operations by [`Future`](std::future::Future).
     pub fn poll(&self) {
-        trace!("Polling operations");
-
         let mut uring_guard = self.uring.borrow_mut();
         let completion_queue = uring_guard.completion();
 
