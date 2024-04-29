@@ -1,8 +1,9 @@
-use async_bpm::{bpm::BufferPoolManager, page::PageId};
+use async_bpm::{bpm::BufferPoolManager, bpm::BPM, page::PageId};
 use std::fs::File;
+use std::ops::DerefMut;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
-use std::{ops::DerefMut, sync::Arc};
 use tokio::sync::Barrier;
 use tokio::task::LocalSet;
 use tracing::{info, trace, Level};
@@ -28,24 +29,20 @@ fn test_bpm_threads() {
 
     const THREADS: usize = 96;
 
-    let bpm = Arc::new(BufferPoolManager::new(2, THREADS * 2));
+    BufferPoolManager::initialize(2, THREADS * 2);
 
-    // Spawn the eviction thread / single task
-    let bpm_evictor = bpm.clone();
-    bpm_evictor.spawn_evictor();
+    let bpm = BPM.get().unwrap();
 
     // Spawn all threads
     thread::scope(|s| {
         for i in 0..THREADS {
-            let bpm_clone = bpm.clone();
-
             s.spawn(move || {
-                let rt = bpm_clone.build_thread_runtime();
+                let rt = bpm.build_thread_runtime();
 
                 let local = LocalSet::new();
                 local.spawn_local(async move {
                     let pid = PageId::new(i as u64);
-                    let ph = bpm_clone.get_page(&pid).await;
+                    let ph = bpm.get_page(&pid).await;
 
                     let mut guard = ph.write().await;
 
@@ -85,34 +82,31 @@ fn test_bpm_upwards() {
 
     const THREADS: usize = 95;
 
-    let bpm = Arc::new(BufferPoolManager::new(128, THREADS * 2));
+    BufferPoolManager::initialize(2, THREADS * 2);
 
-    // Spawn the eviction thread / single task
-    let bpm_evictor = bpm.clone();
-    bpm_evictor.spawn_evictor();
+    let bpm = BPM.get().unwrap();
 
     // Spawn all threads
     thread::scope(|s| {
         let b = Arc::new(Barrier::new(THREADS));
 
         for i in 0..THREADS {
-            let bpm_clone = bpm.clone();
             let barrier = b.clone();
 
             s.spawn(move || {
-                let rt = bpm_clone.build_thread_runtime();
+                let rt = bpm.build_thread_runtime();
 
                 let local = LocalSet::new();
                 local.spawn_local(async move {
                     let pid1 = PageId::new(i as u64);
-                    let ph1 = bpm_clone.get_page(&pid1).await;
+                    let ph1 = bpm.get_page(&pid1).await;
 
                     let mut write_guard = ph1.write().await;
                     write_guard.deref_mut().fill(b' ' + i as u8);
                     write_guard.flush().await;
 
                     let pid2 = PageId::new((i + 1) as u64);
-                    let ph2 = bpm_clone.get_page(&pid2).await;
+                    let ph2 = bpm.get_page(&pid2).await;
 
                     // Check if the next thread has finished
                     loop {

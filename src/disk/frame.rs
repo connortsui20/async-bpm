@@ -36,7 +36,7 @@ pub struct Frame {
 
 impl Frame {
     /// Creates a new and owned [`Frame`].
-    fn new(buf: &'static mut [u8], frame_group: Arc<FrameGroup>, group_index: usize) -> Self {
+    pub fn new(buf: &'static mut [u8], frame_group: Arc<FrameGroup>, group_index: usize) -> Self {
         assert_eq!(buf.len(), PAGE_SIZE);
         Self {
             buf,
