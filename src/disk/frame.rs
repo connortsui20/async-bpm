@@ -9,10 +9,7 @@
 //! pre-determined groups of frames without having to manage which logical pages are in memory or
 //! not in memory.
 
-use super::{
-    disk_manager::DISK_MANAGER,
-    eviction::{FrameTemperature, TemperatureState},
-};
+use super::{disk_manager::DISK_MANAGER, eviction::FrameTemperature};
 use crate::page::{PageRef, WritePageGuard, PAGE_SIZE};
 use async_channel::{Receiver, Sender};
 use futures::future;
@@ -69,6 +66,11 @@ impl Frame {
     /// Returns a mutable pointer to this frame's buffer.
     pub(crate) fn as_mut_ptr(&mut self) -> *mut u8 {
         self.buf.as_mut_ptr()
+    }
+
+    /// Returns a reference to the owner of this page, if this `Frame` actually has an owner.
+    pub(crate) fn get_page_owner(&self) -> Option<PageRef> {
+        self.frame_group.frame_states[self.group_index].load_owner()
     }
 }
 
@@ -154,22 +156,17 @@ impl FrameGroup {
         }
     }
 
-    /// Runs the second chance / clock algorithm on all of the [`Frame`]s in this `FrameGroup`.
+    /// Runs the second chance / clock algorithm on all of the [`Frame`]s in this `FrameGroup`, and
+    /// then evicts all of the frames that have been cooled twice.
     pub async fn cool(&self) {
         let dmh = DISK_MANAGER.get().unwrap().create_handle();
 
         let mut eviction_pages: Vec<PageRef> = Vec::with_capacity(FRAME_GROUP_SIZE);
 
         // Cool all of the frames, recording a frame if it is already cool
-        for frame in self.frame_states.iter() {
-            let mut guard = frame.inner.lock().await;
-            match guard.deref() {
-                TemperatureState::Hot(page) => *guard = TemperatureState::Cool(page.clone()),
-                TemperatureState::Cool(page) => {
-                    eviction_pages.push(page.clone());
-                    *guard = TemperatureState::Cold;
-                }
-                TemperatureState::Cold => (),
+        for frame_temperature in self.frame_states.iter() {
+            if let Some(page) = frame_temperature.cool() {
+                eviction_pages.push(page);
             }
         }
 

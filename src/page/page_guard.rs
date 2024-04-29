@@ -97,10 +97,7 @@ impl<'a> WritePageGuard<'a> {
         let frame = self.guard.take().unwrap();
 
         let pid = frame
-            .owner
-            .load()
-            .deref()
-            .as_ref()
+            .get_page_owner()
             .expect("WritePageGuard protects a Frame that does not have an Page Owner")
             .pid;
 
