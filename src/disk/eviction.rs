@@ -1,11 +1,13 @@
 //! This module contains the types used to manage eviction state for the frame eviction algorithm.
 
-use std::sync::atomic::{AtomicU8, Ordering};
+use crate::page::PageRef;
+use std::ops::Deref;
+use tokio::sync::Mutex;
 
 /// The type representing a [`Frame`](super::frame::Frame)'s eviction state.
 #[derive(Debug)]
-pub struct Temperature {
-    inner: AtomicU8,
+pub(crate) struct FrameTemperature {
+    pub(crate) inner: Mutex<TemperatureState>,
 }
 
 /// The enum representing the possible values for [`Temperature`].
@@ -13,37 +15,49 @@ pub struct Temperature {
 /// The reason this is separate from the [`Temperature`] struct is because we cannot represent do
 /// atomic operations on enums in Rust.
 #[derive(Debug)]
-#[repr(u8)]
-pub enum TemperatureState {
+pub(crate) enum TemperatureState {
     /// Represents a frequently / recently accessed [`Frame`](super::frame::Frame).
-    Hot = 2,
+    Hot(PageRef),
     /// Represents an infrequently or old [`Frame`](super::frame::Frame) that might be evicted soon.
-    Cool = 1,
+    Cool(PageRef),
     /// Represents a [`Frame`](super::frame::Frame) that does not hold any
     /// [`Page`](crate::page::Page)'s data.
-    Cold = 0,
+    Cold,
 }
 
-impl Temperature {
-    /// Creates a new `Temperature` type for tracking eviction state.
-    pub fn new(state: TemperatureState) -> Self {
+impl Default for FrameTemperature {
+    fn default() -> Self {
         Self {
-            inner: AtomicU8::new(state as u8),
+            inner: Mutex::new(TemperatureState::Cold),
+        }
+    }
+}
+
+impl FrameTemperature {
+    /// Atomically sets the temperature as [`TemperatureState::Hot`] and then stores the page that
+    /// owns the [`Frame`](super::frame::Frame) into the state.
+    pub(crate) async fn store_owner(&self, page: PageRef) {
+        let mut guard = self.inner.lock().await;
+        *guard = TemperatureState::Hot(page)
+    }
+
+    /// Atomically loads the [`Page`] that owns the [`Frame`](super::frame::Frame), if that exists.
+    pub(crate) async fn load_owner(&self) -> Option<PageRef> {
+        let guard = self.inner.lock().await;
+        match guard.deref() {
+            TemperatureState::Hot(page) => Some(page.clone()),
+            TemperatureState::Cool(page) => Some(page.clone()),
+            TemperatureState::Cold => None,
         }
     }
 
-    /// Atomically stores a [`TemperatureState`] into the [`Temperature`] type.
-    pub fn store(&self, state: TemperatureState, order: Ordering) {
-        self.inner.store(state as u8, order);
-    }
-
-    /// Atomically loads a [`TemperatureState`] from the [`Temperature`] type.
-    pub fn load(&self, order: Ordering) -> TemperatureState {
-        match self.inner.load(order) {
-            0 => TemperatureState::Cold,
-            1 => TemperatureState::Cool,
-            2 => TemperatureState::Hot,
-            _ => unreachable!("Had an invalid value inside the `Temperature` struct"),
+    /// Updates the eviction state after this frame has been accessed.
+    pub(crate) async fn was_accessed(&self) {
+        let mut guard = self.inner.lock().await;
+        match guard.deref() {
+            TemperatureState::Hot(_) => (),
+            TemperatureState::Cool(page) => *guard = TemperatureState::Hot(page.clone()),
+            TemperatureState::Cold => (),
         }
     }
 }

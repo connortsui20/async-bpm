@@ -38,8 +38,6 @@ pub struct DiskManager {
     io_urings: ThreadLocal<SendWrapper<IoUringAsync>>,
 
     /// The file storing all data. While the [`DiskManager`] has ownership, it won't be closed.
-    ///
-    /// TODO This should be abstracted to support any number of files
     file: File,
 }
 
@@ -68,9 +66,10 @@ impl DiskManager {
             file,
         };
 
+        // Set the global disk manager instance
         DISK_MANAGER
             .set(dm)
-            .expect("Tried to initialize the disk pool manager more than once")
+            .expect("Tried to set the global disk pool manager more than once")
     }
 
     /// Creates a thread-local [`DiskManagerHandle`] that has a reference back to this disk manager.
@@ -113,11 +112,11 @@ pub struct DiskManagerHandle {
 
 impl DiskManagerHandle {
     /// Reads a page's data into a [`Frame`] from disk.
-    pub async fn read_into(&self, pid: PageId, frame: Frame) -> Result<Frame, Frame> {
+    pub async fn read_into(&self, pid: PageId, mut frame: Frame) -> Result<Frame, Frame> {
         let fd = Fd(DISK_MANAGER.get().unwrap().file.as_raw_fd());
 
         // Since we own the frame (and nobody else is reading from it), this is fine to mutate
-        let buf_ptr = frame.buf.as_ptr() as *mut _;
+        let buf_ptr = frame.as_mut_ptr();
 
         let entry = opcode::Read::new(fd, buf_ptr, PAGE_SIZE as u32)
             .offset(pid.offset())
@@ -139,7 +138,7 @@ impl DiskManagerHandle {
     pub async fn write_from(&self, pid: PageId, frame: Frame) -> Result<Frame, Frame> {
         let fd = Fd(DISK_MANAGER.get().unwrap().file.as_raw_fd());
 
-        let buf_ptr = frame.buf.as_ptr();
+        let buf_ptr = frame.as_ptr();
 
         let entry = opcode::Write::new(fd, buf_ptr, PAGE_SIZE as u32)
             .offset(pid.offset())
