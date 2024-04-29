@@ -1,9 +1,8 @@
 //! Wrappers around `tokio`'s `RwLockReadGuard` and `RwLockWriteGuard`, dedicated for pages of data.
 
-use super::{PageId, PAGE_SIZE};
+use super::PageId;
 use crate::disk::{disk_manager::DiskManagerHandle, frame::Frame};
 use std::ops::{Deref, DerefMut};
-use std::slice;
 use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
 use tracing::debug;
 
@@ -77,7 +76,7 @@ impl<'a> WritePageGuard<'a> {
         dmh: DiskManagerHandle,
     ) -> Self {
         assert!(
-            guard.deref().is_some(),
+            guard.is_some(),
             "Cannot create a WritePageGuard that does not own a Frame"
         );
 
@@ -88,25 +87,21 @@ impl<'a> WritePageGuard<'a> {
     pub async fn flush(&mut self) {
         debug!("Flushing {}", self.pid);
 
-        // If there is nothing for us to flush
-        if self.guard.is_none() {
-            return;
-        }
+        assert!(self.guard.is_some());
 
         // Temporarily take ownership of the frame from the guard
         let frame = self.guard.take().unwrap();
 
-        let pid = frame
-            .get_page_owner()
-            .expect("WritePageGuard protects a Frame that does not have an Page Owner")
-            .pid;
+        debug!("About to write out {} to disk", self.pid);
 
         // Write the data out to disk
         let frame = self
             .dmh
-            .write_from(pid, frame)
+            .write_from(self.pid, frame)
             .await
-            .unwrap_or_else(|_| panic!("Was unable to write data from page {} to disk", pid));
+            .unwrap_or_else(|_| panic!("Was unable to write data from page {} to disk", self.pid));
+
+        debug!("Wrote {} to disk", self.pid);
 
         // Give ownership back to the guard
         self.guard.replace(frame);
@@ -114,10 +109,15 @@ impl<'a> WritePageGuard<'a> {
 
     /// Evicts the page from memory, consuming the guard in the process.
     pub(crate) async fn evict(mut self) -> Frame {
+        assert!(self.guard.is_some());
+
+        debug!("Flushing in evict");
         self.flush().await;
 
         let frame = self.guard.take().unwrap();
         frame.evict_page_owner().unwrap();
+
+        debug!("Finished evicting page {}", self.pid);
 
         frame
     }
@@ -136,15 +136,10 @@ impl<'a> Deref for WritePageGuard<'a> {
 
 impl<'a> DerefMut for WritePageGuard<'a> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        let ptr = self
-            .guard
-            .deref()
-            .as_ref()
+        self.guard
+            .deref_mut()
+            .as_mut()
             .expect("Somehow have a WritePageGuard without an owned frame")
-            .as_ptr() as *mut u8;
-
-        // TODO safety
-        unsafe { slice::from_raw_parts_mut(ptr, PAGE_SIZE) }
     }
 }
 

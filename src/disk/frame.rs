@@ -17,6 +17,7 @@ use std::{
     ops::{Deref, DerefMut},
     sync::Arc,
 };
+use tracing::debug;
 
 /// An owned buffer frame, intended to be shared between user and kernel space.
 #[derive(Debug)]
@@ -172,6 +173,7 @@ impl FrameGroup {
                 return frame;
             }
 
+            debug!("Couldn't find a free frame, running cooling algorithm");
             self.cool().await;
         }
     }
@@ -190,6 +192,12 @@ impl FrameGroup {
             }
         }
 
+        if eviction_pages.is_empty() {
+            return;
+        }
+
+        debug!("Pages up for eviction: {}", eviction_pages.len());
+
         // Attempt to evict all of the already cool frames
         let futures: Vec<_> = eviction_pages
             .iter()
@@ -202,11 +210,16 @@ impl FrameGroup {
                     // If we cannot get the write guard immediately, then someone else has it and we
                     // don't need to evict this frame now.
                     if let Ok(guard) = page.inner.try_write() {
+                        debug!("Force evicting page {}", page.pid);
                         let write_guard = WritePageGuard::new(page.pid, guard, dmh);
 
+                        debug!("Evicting the page guard");
                         let frame = write_guard.evict().await;
 
+                        debug!("Sending frame back");
                         self.free_frames.0.send(frame).await.unwrap();
+                    } else {
+                        debug!("Could not get lock on page {}", page.pid);
                     }
                 }
             })
