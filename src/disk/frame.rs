@@ -150,7 +150,7 @@ impl FrameGroup {
             free_frames: (rx.clone(), tx),
         });
 
-        // All free frames should start ilet fnside the `free_frames` channel
+        // All free frames should start inside the `free_frames` channel
         buffers
             .into_iter()
             .enumerate()
