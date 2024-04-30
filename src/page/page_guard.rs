@@ -4,7 +4,6 @@ use super::PageId;
 use crate::disk::{disk_manager::DiskManager, frame::Frame};
 use std::ops::{Deref, DerefMut};
 use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
-use tracing::debug;
 
 /// A read guard for a [`Page`](super::Page)'s `Frame`, which pins the page's data in memory.
 ///
@@ -38,8 +37,6 @@ impl<'a> ReadPageGuard<'a> {
             guard.deref().is_some(),
             "Cannot create a ReadPageGuard that does not own a Frame"
         );
-
-        debug!("Created ReadPageGuard of {}", pid);
 
         Self { _pid: pid, guard }
     }
@@ -88,8 +85,6 @@ impl<'a> WritePageGuard<'a> {
             guard.is_some(),
             "Cannot create a WritePageGuard that does not own a Frame"
         );
-
-        debug!("Created WritePageGuard of {}", pid);
 
         Self { pid, guard }
     }
