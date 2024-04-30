@@ -6,13 +6,12 @@ use std::sync::Mutex;
 use std::thread;
 use tokio::sync::Barrier;
 use tokio::task::LocalSet;
+use tracing::debug;
 use tracing::{info, trace, Level};
 
 #[test]
 #[ignore]
 fn test_bpm_threads() {
-    trace!("Starting test_bpm_threads");
-
     let log_file = File::create("test_bpm_threads.log").unwrap();
 
     let stdout_subscriber = tracing_subscriber::fmt()
@@ -27,9 +26,9 @@ fn test_bpm_threads() {
         .finish();
     tracing::subscriber::set_global_default(stdout_subscriber).unwrap();
 
-    const THREADS: usize = 8;
+    const THREADS: usize = 4;
 
-    BufferPoolManager::initialize(4, THREADS * 2);
+    BufferPoolManager::initialize(16, THREADS * 2);
 
     let bpm = BPM.get().unwrap();
 
@@ -41,17 +40,41 @@ fn test_bpm_threads() {
 
                 let local = LocalSet::new();
                 local.spawn_local(async move {
-                    let pid = PageId::new(i as u64);
+                    let index = 2 * i as u8;
+                    let pid = PageId::new(index as u64);
                     let ph = bpm.get_page(&pid).await;
 
                     {
+                        debug!("1st attempting to write");
                         let mut guard = ph.write().await;
-                        guard.deref_mut().fill(b' ' + i as u8);
+                        debug!("1st got guard");
+                        guard.deref_mut().fill(b' ' + index);
                         guard.flush().await;
+                        debug!("Finished 1st");
                     }
 
-                    #[allow(clippy::empty_loop)]
-                    loop {}
+                    loop {
+                        tokio::task::yield_now().await;
+                    }
+                });
+
+                local.spawn_local(async move {
+                    let index = ((2 * i) + 1) as u8;
+                    let pid = PageId::new(index as u64);
+                    let ph = bpm.get_page(&pid).await;
+
+                    {
+                        debug!("2nd attempting to write");
+                        let mut guard = ph.write().await;
+                        debug!("2nd got guard");
+                        guard.deref_mut().fill(b' ' + index);
+                        guard.flush().await;
+                        debug!("Finished 2nd");
+                    }
+
+                    loop {
+                        tokio::task::yield_now().await;
+                    }
                 });
 
                 rt.block_on(local);

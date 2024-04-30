@@ -12,7 +12,7 @@ use std::{
     rc::Rc,
 };
 use tokio::io::unix::AsyncFd;
-use tracing::warn;
+use tracing::{debug, warn};
 
 /// The default number of `io_uring` submission entries.
 pub const IO_URING_DEFAULT_ENTRIES: u16 = 1 << 12; // 4096
@@ -92,6 +92,8 @@ impl IoUringAsync {
         let mut uring_guard = self.uring.borrow_mut();
         let mut submission_queue = uring_guard.submission();
 
+        debug!("About to push operation {id}");
+
         // Safety: We must ensure that the parameters of this entry are valid for the entire
         // duration of the operation, and this is guaranteed by this function's safety contract.
         while unsafe { submission_queue.push(&entry).is_err() } {
@@ -114,6 +116,7 @@ impl IoUringAsync {
     /// Ideally, this function should be called on the [`IoUringAsync`] instance every time a worker
     /// thread parks. For example, call `submit` from [`tokio::runtime::Builder::on_thread_park`].
     pub fn submit(&self) -> std::io::Result<usize> {
+        debug!("Submitting");
         self.uring.borrow().submit()
     }
 
@@ -134,6 +137,7 @@ impl IoUringAsync {
         // Iterate through all of the completed operations
         for cqe in completion_queue {
             let id = cqe.user_data();
+            debug!("Operation {id} finished");
 
             // This is safe to unwrap since we only remove the `Lifecycle` from the table after the
             // owning `Op` gets dropped. Since `Op` is only dropped after it has polled/observed a

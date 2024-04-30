@@ -11,6 +11,7 @@ use crate::{
 use io_uring::{opcode, types::Fd};
 use libc::O_DIRECT;
 use send_wrapper::SendWrapper;
+use tracing::debug;
 use std::{
     fs::{File, OpenOptions},
     io::IoSliceMut,
@@ -142,9 +143,13 @@ impl DiskManagerHandle {
             .build()
             .user_data(pid.as_u64());
 
+        debug!("Writing out {}", pid);
+
         // Safety: Since this function owns the `Frame`, we can guarantee that the buffer the
         // `Frame` owns will be valid for the entire duration of this operation
         let cqe = unsafe { self.uring.push(entry).await };
+
+        debug!("Finished writing out {}", pid);
 
         if cqe.result() >= 0 {
             Ok(frame)

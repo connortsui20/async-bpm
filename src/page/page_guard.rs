@@ -2,6 +2,7 @@
 
 use super::PageId;
 use crate::disk::{disk_manager::DiskManagerHandle, frame::Frame};
+use io_uring::opcode::Write;
 use std::ops::{Deref, DerefMut};
 use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
 
@@ -104,6 +105,12 @@ impl<'a> WritePageGuard<'a> {
         frame.evict_page_owner().await.unwrap();
 
         frame
+    }
+}
+
+impl<'a> Drop for WritePageGuard<'a> {
+    fn drop(&mut self) {
+        assert!(self.guard.is_some())
     }
 }
 
