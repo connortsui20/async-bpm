@@ -45,8 +45,9 @@ fn test_bpm_threads() {
                     let ph = bpm.get_page(&pid).await;
 
                     {
-                        debug!("1st attempting to write");
+                        debug!("1st attempting to write {}", pid);
                         let mut guard = ph.write().await;
+                        debug!("1st got guard for {}", pid);
                         guard.deref_mut().fill(b' ' + index);
                         guard.flush().await;
                     }
@@ -62,8 +63,9 @@ fn test_bpm_threads() {
                     let ph = bpm.get_page(&pid).await;
 
                     {
-                        debug!("2nd attempting to write");
+                        debug!("2nd attempting to write {}", pid);
                         let mut guard = ph.write().await;
+                        debug!("2nd got guard for {}", pid);
                         guard.deref_mut().fill(b' ' + index);
                         guard.flush().await;
                     }
