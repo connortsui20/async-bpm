@@ -2,9 +2,9 @@
 
 use super::PageId;
 use crate::disk::{disk_manager::DiskManagerHandle, frame::Frame};
-use io_uring::opcode::Write;
 use std::ops::{Deref, DerefMut};
 use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
+use tracing::debug;
 
 /// A read guard for a [`Page`](super::Page)'s `Frame`, which pins the page's data in memory.
 ///
@@ -30,6 +30,8 @@ impl<'a> ReadPageGuard<'a> {
             "Cannot create a ReadPageGuard that does not own a Frame"
         );
 
+        debug!("Created ReadPageGuard of {}", pid);
+
         Self { pid, guard }
     }
 }
@@ -42,6 +44,12 @@ impl<'a> Deref for ReadPageGuard<'a> {
             .deref()
             .as_ref()
             .expect("Somehow have a ReadPageGuard without an owned frame")
+    }
+}
+
+impl<'a> Drop for ReadPageGuard<'a> {
+    fn drop(&mut self) {
+        debug!("Dropping ReadPageGuard on {}", self.pid)
     }
 }
 
@@ -73,6 +81,8 @@ impl<'a> WritePageGuard<'a> {
             guard.is_some(),
             "Cannot create a WritePageGuard that does not own a Frame"
         );
+
+        debug!("Created WritePageGuard of {}", pid);
 
         Self { pid, guard, dmh }
     }
@@ -110,7 +120,7 @@ impl<'a> WritePageGuard<'a> {
 
 impl<'a> Drop for WritePageGuard<'a> {
     fn drop(&mut self) {
-        assert!(self.guard.is_some())
+        debug!("Dropping WritePageGuard on {}", self.pid)
     }
 }
 

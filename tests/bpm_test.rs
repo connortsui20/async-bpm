@@ -47,10 +47,8 @@ fn test_bpm_threads() {
                     {
                         debug!("1st attempting to write");
                         let mut guard = ph.write().await;
-                        debug!("1st got guard");
                         guard.deref_mut().fill(b' ' + index);
                         guard.flush().await;
-                        debug!("Finished 1st");
                     }
 
                     loop {
@@ -66,10 +64,8 @@ fn test_bpm_threads() {
                     {
                         debug!("2nd attempting to write");
                         let mut guard = ph.write().await;
-                        debug!("2nd got guard");
                         guard.deref_mut().fill(b' ' + index);
                         guard.flush().await;
-                        debug!("Finished 2nd");
                     }
 
                     loop {
