@@ -13,8 +13,13 @@ use tokio::sync::RwLockWriteGuard;
 #[derive(Derivative)]
 #[derivative(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PageHandle {
+    /// A shared pointer to the [`Page`](super::Page) object.
     pub(crate) page: PageRef,
 
+    /// A thread-local handle to the disk manager.
+    ///
+    /// Note that it is possible to remove this field and create disk manager handles on demand.
+    /// TODO should this be on demand or not?
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) dm: DiskManagerHandle,
 }
@@ -73,13 +78,13 @@ impl PageHandle {
         // If it is already loaded, then we're done
         if let Some(frame) = write_guard.deref() {
             frame.record_access();
-            return WritePageGuard::new(self.page.pid, write_guard, self.dm.clone());
+            return WritePageGuard::new(self.page.pid, write_guard);
         }
 
         // Otherwise we need to load the page into memory
         self.load(&mut write_guard).await;
 
-        WritePageGuard::new(self.page.pid, write_guard, self.dm.clone())
+        WritePageGuard::new(self.page.pid, write_guard)
     }
 
     /// Attempts to grab the write lock. If unsuccessful, this function does nothing. Otherwise,
@@ -92,21 +97,13 @@ impl PageHandle {
         // If it is already loaded, then we're done
         if let Some(frame) = write_guard.deref() {
             frame.record_access();
-            return Some(WritePageGuard::new(
-                self.page.pid,
-                write_guard,
-                self.dm.clone(),
-            ));
+            return Some(WritePageGuard::new(self.page.pid, write_guard));
         }
 
         // Otherwise we need to load the page into memory
         self.load(&mut write_guard).await;
 
-        Some(WritePageGuard::new(
-            self.page.pid,
-            write_guard,
-            self.dm.clone(),
-        ))
+        Some(WritePageGuard::new(self.page.pid, write_guard))
     }
 
     /// Loads page data from disk into a frame in memory.
