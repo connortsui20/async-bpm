@@ -146,7 +146,7 @@ impl BufferPoolManager {
     ///
     /// Intended for use by an eviction algorithm.
     pub(crate) fn get_random_frame_group(&self) -> FrameGroupRef {
-        let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
+        let mut rng = rand::thread_rng();
         let index = rng.gen_range(0..self.frame_groups.len());
 
         self.frame_groups[index].clone()
