@@ -65,6 +65,7 @@ impl Frame {
         self.buf.as_mut_ptr()
     }
 
+    /// Gets a `Frame`'s eviction state (via its [`FrameGroup`]).
     pub fn eviction_state(&self) -> &EvictionState {
         &self.frame_group.frame_states[self.group_index]
     }
@@ -79,6 +80,8 @@ impl Frame {
         self.eviction_state().set_owner(page)
     }
 
+    /// Changes the `Frame`'s state to [`Cold`](super::eviction::FrameTemperature::Cold) and returns
+    /// the previous owner of the current `Frame`, if it had a [`PageRef`] owner in the first place.
     pub fn evict_page_owner(&self) -> Option<PageRef> {
         self.eviction_state().evict()
     }
