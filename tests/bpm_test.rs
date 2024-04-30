@@ -12,8 +12,6 @@ use tracing::{info, trace, Level};
 #[test]
 #[ignore]
 fn test_bpm_threads() {
-    std::fs::remove_file("db.test").unwrap();
-
     let log_file = File::create("test_bpm_threads.log").unwrap();
 
     let stdout_subscriber = tracing_subscriber::fmt()
@@ -28,9 +26,9 @@ fn test_bpm_threads() {
         .finish();
     tracing::subscriber::set_global_default(stdout_subscriber).unwrap();
 
-    const THREADS: usize = 4;
+    const THREADS: usize = 32;
 
-    BufferPoolManager::initialize(16, THREADS * 4);
+    BufferPoolManager::initialize(64, THREADS * 2);
 
     let bpm = BPM.get().unwrap();
 
@@ -43,6 +41,7 @@ fn test_bpm_threads() {
                 let rt = bpm.build_thread_runtime();
 
                 let local = LocalSet::new();
+
                 local.spawn_local(async move {
                     let index = 2 * i as u8;
                     let pid = PageId::new(index as u64);
@@ -52,10 +51,6 @@ fn test_bpm_threads() {
                         let mut guard = ph.write().await;
                         guard.deref_mut().fill(b' ' + index);
                         guard.flush().await;
-                    }
-
-                    loop {
-                        tokio::task::yield_now().await;
                     }
                 });
 
@@ -68,10 +63,6 @@ fn test_bpm_threads() {
                         let mut guard = ph.write().await;
                         guard.deref_mut().fill(b' ' + index);
                         guard.flush().await;
-                    }
-
-                    loop {
-                        tokio::task::yield_now().await;
                     }
                 });
 
@@ -100,9 +91,8 @@ fn test_bpm_upwards() {
         .finish();
     tracing::subscriber::set_global_default(stdout_subscriber).unwrap();
 
-    const THREADS: usize = 95;
-
-    BufferPoolManager::initialize(2, THREADS * 2);
+    const THREADS: usize = 96;
+    BufferPoolManager::initialize(128, THREADS * 2);
 
     let bpm = BPM.get().unwrap();
 
