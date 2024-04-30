@@ -102,7 +102,7 @@ impl<'a> WritePageGuard<'a> {
         self.flush().await;
 
         let frame = self.guard.take().unwrap();
-        frame.evict_page_owner().await.unwrap();
+        frame.evict_page_owner().unwrap();
 
         frame
     }

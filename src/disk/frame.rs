@@ -70,22 +70,22 @@ impl Frame {
     }
 
     /// Returns a reference to the owner of this page, if this `Frame` actually has an owner.
-    pub async fn get_page_owner(&self) -> Option<PageRef> {
-        self.eviction_state().get_owner().await
+    pub fn get_page_owner(&self) -> Option<PageRef> {
+        self.eviction_state().get_owner()
     }
 
     /// Sets the frame's owner as the given page.
-    pub async fn set_page_owner(&self, page: PageRef) {
-        self.eviction_state().set_owner(page).await
+    pub fn set_page_owner(&self, page: PageRef) {
+        self.eviction_state().set_owner(page)
     }
 
-    pub async fn evict_page_owner(&self) -> Option<PageRef> {
-        self.eviction_state().evict().await
+    pub fn evict_page_owner(&self) -> Option<PageRef> {
+        self.eviction_state().evict()
     }
 
     /// Records an access on the current `Frame`.
-    pub async fn record_access(&self) {
-        self.eviction_state().record_access().await
+    pub fn record_access(&self) {
+        self.eviction_state().record_access()
     }
 }
 
@@ -168,7 +168,7 @@ impl FrameGroup {
     pub async fn get_free_frame(&self, page: PageRef) -> Frame {
         loop {
             if let Ok(frame) = self.free_frames.1.try_recv() {
-                self.frame_states[frame.group_index].set_owner(page).await;
+                self.frame_states[frame.group_index].set_owner(page);
                 return frame;
             }
 
@@ -185,7 +185,7 @@ impl FrameGroup {
 
         // Cool all of the frames, recording a frame if it is already cool
         for frame_temperature in self.frame_states.iter() {
-            if let Some(page) = frame_temperature.cool().await {
+            if let Some(page) = frame_temperature.cool() {
                 eviction_pages.push(page);
             }
         }

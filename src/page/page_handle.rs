@@ -31,7 +31,7 @@ impl PageHandle {
 
         // If it is already loaded, then we're done
         if let Some(frame) = read_guard.deref() {
-            frame.record_access().await;
+            frame.record_access();
             return ReadPageGuard::new(self.page.pid, read_guard);
         }
 
@@ -53,7 +53,7 @@ impl PageHandle {
 
         // If it is already loaded, then we're done
         if let Some(frame) = read_guard.deref() {
-            frame.record_access().await;
+            frame.record_access();
             return Some(ReadPageGuard::new(self.page.pid, read_guard));
         }
 
@@ -72,7 +72,7 @@ impl PageHandle {
 
         // If it is already loaded, then we're done
         if let Some(frame) = write_guard.deref() {
-            frame.record_access().await;
+            frame.record_access();
             return WritePageGuard::new(self.page.pid, write_guard, self.dm.clone());
         }
 
@@ -91,7 +91,7 @@ impl PageHandle {
 
         // If it is already loaded, then we're done
         if let Some(frame) = write_guard.deref() {
-            frame.record_access().await;
+            frame.record_access();
             return Some(WritePageGuard::new(
                 self.page.pid,
                 write_guard,
@@ -113,7 +113,7 @@ impl PageHandle {
     async fn load(&self, guard: &mut RwLockWriteGuard<'_, Option<Frame>>) {
         // If someone else got in front of us and loaded the page for us
         if let Some(frame) = guard.deref().deref() {
-            frame.record_access().await;
+            frame.record_access();
             return;
         }
 

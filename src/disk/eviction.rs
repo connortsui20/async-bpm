@@ -2,12 +2,15 @@
 
 use crate::page::PageRef;
 use std::ops::Deref;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 /// The type representing a [`Frame`](super::frame::Frame)'s eviction state.
 #[derive(Debug)]
 pub struct EvictionState {
-    /// A mutex-protected [`FrameTemperature`] enum to ensure atomic operations.
+    /// A mutex-protected [`TemperatureState`] enum to ensure atomic operations.
+    ///
+    /// We use a synchronous / blocking mutex since operations should be held for very short periods
+    /// of time, and also to ensure that operations on `FrameTemperature` are no asynchronous.
     pub inner: Mutex<FrameTemperature>,
 }
 
@@ -38,8 +41,12 @@ impl Default for EvictionState {
 
 impl EvictionState {
     /// Updates the eviction state after this frame has been accessed.
-    pub async fn record_access(&self) {
-        let mut guard = self.inner.lock().await;
+    pub fn record_access(&self) {
+        let mut guard = self
+            .inner
+            .lock()
+            .expect("FrameTemperature mutex was poisoned");
+
         match guard.deref() {
             FrameTemperature::Hot(_) => (),
             FrameTemperature::Cool(page) => *guard = FrameTemperature::Hot(page.clone()),
@@ -49,15 +56,23 @@ impl EvictionState {
 
     /// Atomically sets the temperature as [`FrameTemperature::Hot`] and then stores the page that
     /// owns the [`Frame`](super::frame::Frame) into the state.
-    pub async fn set_owner(&self, page: PageRef) {
-        let mut guard = self.inner.lock().await;
+    pub fn set_owner(&self, page: PageRef) {
+        let mut guard = self
+            .inner
+            .lock()
+            .expect("FrameTemperature mutex was poisoned");
+
         *guard = FrameTemperature::Hot(page)
     }
 
     /// Atomically loads the [`Page`](crate::page::Page) that owns the
     /// [`Frame`](super::frame::Frame), if an owner exists.
-    pub async fn get_owner(&self) -> Option<PageRef> {
-        let guard = self.inner.lock().await;
+    pub fn get_owner(&self) -> Option<PageRef> {
+        let guard = self
+            .inner
+            .lock()
+            .expect("FrameTemperature mutex was poisoned");
+
         match guard.deref() {
             FrameTemperature::Hot(page) => Some(page.clone()),
             FrameTemperature::Cool(page) => Some(page.clone()),
@@ -73,8 +88,11 @@ impl EvictionState {
     ///
     /// If the state transitions to [`Cold`](FrameTemperature::Cold), this function will return the
     /// [`PageRef`] that it used to hold.
-    pub async fn cool(&self) -> Option<PageRef> {
-        let mut guard = self.inner.lock().await;
+    pub fn cool(&self) -> Option<PageRef> {
+        let mut guard = self
+            .inner
+            .lock()
+            .expect("FrameTemperature mutex was poisoned");
 
         match guard.deref() {
             FrameTemperature::Hot(page) => {
@@ -92,8 +110,11 @@ impl EvictionState {
 
     /// Atomically cools down the eviction state all the way to [`Cold`](FrameTemperature::Cold),
     /// returning the owning [`PageRef`] if it wasn't already [`Cold`](FrameTemperature::Cold).
-    pub async fn evict(&self) -> Option<PageRef> {
-        let mut guard = self.inner.lock().await;
+    pub fn evict(&self) -> Option<PageRef> {
+        let mut guard = self
+            .inner
+            .lock()
+            .expect("FrameTemperature mutex was poisoned");
 
         match guard.deref() {
             FrameTemperature::Hot(page) => {
