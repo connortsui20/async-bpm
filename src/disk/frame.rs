@@ -104,7 +104,7 @@ impl DerefMut for Frame {
 }
 
 /// The number of frames in a [`FrameGroup`].
-pub const FRAME_GROUP_SIZE: usize = 4;
+pub const FRAME_GROUP_SIZE: usize = 64;
 
 /// A fixed group of [`Frame`]s.
 ///
