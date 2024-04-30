@@ -44,13 +44,15 @@ pub struct DiskManager {
 
 impl DiskManager {
     /// Creates a new shared [`DiskManager`] instance.
-    pub fn initialize(capacity: usize, file_name: String, io_slices: Box<[IoSliceMut<'static>]>) {
+    pub fn initialize(capacity: usize, io_slices: Box<[IoSliceMut<'static>]>) {
+        let file_name = "db.test"; // TODO make better
+
         let file = OpenOptions::new()
             .create(true)
             .read(true)
             .write(true)
             .custom_flags(O_DIRECT)
-            .open(&file_name)
+            .open(file_name)
             .unwrap_or_else(|e| panic!("Failed to open file {file_name}, with error: {e}"));
 
         let file_size = capacity * PAGE_SIZE;
@@ -69,6 +71,11 @@ impl DiskManager {
             .expect("Tried to set the global disk pool manager more than once")
     }
 
+    /// Retrieve a static reference to the global disk manager.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if it is called before a call to [`DiskManager::initialize`].
     pub fn get() -> &'static Self {
         DISK_MANAGER
             .get()

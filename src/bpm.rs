@@ -41,10 +41,10 @@ pub struct BufferPoolManager {
     num_frames: usize,
 
     /// A mapping between unique [`PageId`]s and shared [`PageRef`] handles.
-    pub(crate) pages: RwLock<HashMap<PageId, PageRef>>,
+    pages: RwLock<HashMap<PageId, PageRef>>,
 
     /// Groups of frames used to demarcate eviction zones.
-    pub(crate) frame_groups: Box<[FrameGroupRef]>,
+    frame_groups: Box<[FrameGroupRef]>,
 }
 
 impl BufferPoolManager {
@@ -52,7 +52,7 @@ impl BufferPoolManager {
     ///
     /// The argument `capacity` should be the starting number of logical pages the user of the
     /// [`BufferPoolManager`] wishes to use, as it will allocate enough space on disk to initially
-    /// accommodate that number.
+    /// accommodate that number. TODO this is subject to change once the disk manager improves.
     ///
     /// This function will create two copies of the buffers allocated, 1 copy for user access
     /// through `Frame`s and `FrameGroup`s, and another copy for kernel access by registering
@@ -61,18 +61,21 @@ impl BufferPoolManager {
     ///
     /// # Panics
     ///
-    /// This function will panic if `num_frames` is not a multiple of [`FRAME_GROUP_SIZE`]((crate::disk::frame::FRAME_GROUP_SIZE)).
+    /// This function will panic if `num_frames` is not a multiple of
+    /// [`FRAME_GROUP_SIZE`]((crate::disk::frame::FRAME_GROUP_SIZE)).
     pub fn initialize(num_frames: usize, capacity: usize) {
         assert!(
             BPM.get().is_none(),
             "Tried to initialize a BufferPoolManager more than once"
         );
+        assert!(num_frames != 0);
         assert_eq!(num_frames % FRAME_GROUP_SIZE, 0);
         let num_groups = num_frames / FRAME_GROUP_SIZE;
 
         // Allocate all of the buffer memory up front
         let bytes: &'static mut [u8] = vec![0u8; num_frames * PAGE_SIZE].leak();
 
+        // Divide the memory up into `PAGE_SIZE` chunks
         let slices: Vec<&'static mut [u8]> = bytes.chunks_exact_mut(PAGE_SIZE).collect();
         assert_eq!(slices.len(), num_frames);
 
@@ -93,9 +96,6 @@ impl BufferPoolManager {
             .unzip();
         assert_eq!(buffers.len(), num_frames);
 
-        // This copy will only be used to register into the `io_uring` instance, and never accessed
-        let registerable_buffers = registerable_buffers.into_boxed_slice();
-
         // Create the frame groups, taking the groups of buffers off the back of the buffers vector
         let frame_groups: Vec<FrameGroupRef> = (0..num_groups)
             .map(|i| {
@@ -112,25 +112,26 @@ impl BufferPoolManager {
             "All buffers should have been moved into frame groups"
         );
 
-        // Initialize the global `DiskManager` instance
-        DiskManager::initialize(
-            capacity,
-            "db.test".to_string(), // TODO replace file name
-            registerable_buffers,
-        );
-
-        let pages = RwLock::new(HashMap::with_capacity(num_frames));
-
-        let bpm = Self {
+        // Create the bpm and set it as the global static bpm instance
+        BPM.set(Self {
             num_frames,
             frame_groups: frame_groups.into_boxed_slice(),
-            pages,
-        };
+            pages: RwLock::new(HashMap::with_capacity(num_frames)),
+        })
+        .expect("Tried to initialize the buffer pool manager more than once");
 
-        BPM.set(bpm)
-            .expect("Tried to initialize the buffer pool manager more than once");
+        // This copy will only be used to register into the `io_uring` instance, and never accessed
+        let registerable_buffers = registerable_buffers.into_boxed_slice();
+
+        // Initialize the global `DiskManager` instance
+        DiskManager::initialize(capacity, registerable_buffers);
     }
 
+    /// Retrieve a static reference to the global buffer pool manager.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if it is called before a call to [`BufferPoolManager::initialize`].
     pub fn get() -> &'static Self {
         BPM.get()
             .expect("Tried to get a reference to the BPM before it was initialized")
