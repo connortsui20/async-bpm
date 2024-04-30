@@ -10,7 +10,7 @@ pub struct EvictionState {
     /// A mutex-protected [`FrameTemperature`] enum to ensure atomic operations.
     ///
     /// We use a synchronous / blocking mutex since operations should be held for very short periods
-    /// of time, and also to ensure that operations on `FrameTemperature` are no asynchronous.
+    /// of time, and also to ensure that operations on `FrameTemperature` are not asynchronous.
     pub inner: Mutex<FrameTemperature>,
 }
 
