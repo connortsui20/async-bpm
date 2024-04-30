@@ -9,7 +9,7 @@
 //! pre-determined groups of frames without having to manage which logical pages are in memory or
 //! not in memory.
 
-use super::{disk_manager::DISK_MANAGER, eviction::EvictionState};
+use super::{disk_manager::DiskManager, eviction::EvictionState};
 use crate::page::{PageRef, WritePageGuard, PAGE_SIZE};
 use async_channel::{Receiver, Sender};
 use futures::future;
@@ -179,7 +179,7 @@ impl FrameGroup {
     /// Runs the second chance / clock algorithm on all of the [`Frame`]s in this `FrameGroup`, and
     /// then evicts all of the frames that have been cooled twice.
     pub async fn cool(&self) {
-        let dmh = DISK_MANAGER.get().unwrap().create_handle();
+        let dmh = DiskManager::get().create_handle();
 
         let mut eviction_pages: Vec<PageRef> = Vec::with_capacity(FRAME_GROUP_SIZE);
 

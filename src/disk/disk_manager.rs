@@ -21,7 +21,7 @@ use std::{
 use thread_local::ThreadLocal;
 
 /// The global disk manager instance.
-pub static DISK_MANAGER: OnceLock<DiskManager> = OnceLock::new();
+static DISK_MANAGER: OnceLock<DiskManager> = OnceLock::new();
 
 /// Manages reads into and writes from `Frame`s between memory and disk.
 #[derive(Debug)]
@@ -69,6 +69,12 @@ impl DiskManager {
             .expect("Tried to set the global disk pool manager more than once")
     }
 
+    pub fn get() -> &'static Self {
+        DISK_MANAGER
+            .get()
+            .expect("Tried to get a reference to the disk manager before it was initialized")
+    }
+
     /// Creates a thread-local [`DiskManagerHandle`] that has a reference back to this disk manager.
     pub fn create_handle(&self) -> DiskManagerHandle {
         let uring = self.get_thread_local_uring();
@@ -110,7 +116,7 @@ pub struct DiskManagerHandle {
 impl DiskManagerHandle {
     /// Reads a page's data into a `Frame` from disk.
     pub async fn read_into(&self, pid: PageId, mut frame: Frame) -> Result<Frame, Frame> {
-        let fd = Fd(DISK_MANAGER.get().unwrap().file.as_raw_fd());
+        let fd = Fd(DiskManager::get().file.as_raw_fd());
 
         // Since we own the frame (and nobody else is reading from it), this is fine to mutate
         let buf_ptr = frame.as_mut_ptr();
@@ -133,7 +139,7 @@ impl DiskManagerHandle {
 
     /// Writes a page's data on a `Frame` to disk.
     pub async fn write_from(&self, pid: PageId, frame: Frame) -> Result<Frame, Frame> {
-        let fd = Fd(DISK_MANAGER.get().unwrap().file.as_raw_fd());
+        let fd = Fd(DiskManager::get().file.as_raw_fd());
 
         let buf_ptr = frame.as_ptr();
 

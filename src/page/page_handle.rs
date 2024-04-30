@@ -1,7 +1,7 @@
 //! Implementation of the `PageHandle` type.
 
 use super::PageRef;
-use crate::bpm::BPM;
+use crate::bpm::BufferPoolManager;
 use crate::disk::disk_manager::DiskManagerHandle;
 use crate::disk::frame::Frame;
 use crate::page::page_guard::{ReadPageGuard, WritePageGuard};
@@ -118,7 +118,7 @@ impl PageHandle {
         }
 
         // Randomly choose a `FrameGroup` to place load this page into
-        let bpm = BPM.get().unwrap();
+        let bpm = BufferPoolManager::get();
         let frame_group = bpm.get_random_frame_group();
 
         // Wait for a free frame

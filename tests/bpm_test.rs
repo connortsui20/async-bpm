@@ -1,4 +1,4 @@
-use async_bpm::{bpm::BufferPoolManager, bpm::BPM, page::PageId};
+use async_bpm::{bpm::BufferPoolManager, page::PageId};
 use std::fs::File;
 use std::ops::DerefMut;
 use std::sync::Arc;
@@ -30,7 +30,7 @@ fn test_bpm_threads() {
 
     BufferPoolManager::initialize(64, THREADS * 2);
 
-    let bpm = BPM.get().unwrap();
+    let bpm = BufferPoolManager::get();
 
     debug!("Testing test_bpm_threads");
 
@@ -94,7 +94,7 @@ fn test_bpm_upwards() {
     const THREADS: usize = 96;
     BufferPoolManager::initialize(128, THREADS * 2);
 
-    let bpm = BPM.get().unwrap();
+    let bpm = BufferPoolManager::get();
 
     // Spawn all threads
     thread::scope(|s| {

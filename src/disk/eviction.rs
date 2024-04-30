@@ -7,7 +7,7 @@ use std::sync::Mutex;
 /// The type representing a [`Frame`](super::frame::Frame)'s eviction state.
 #[derive(Debug)]
 pub struct EvictionState {
-    /// A mutex-protected [`TemperatureState`] enum to ensure atomic operations.
+    /// A mutex-protected [`FrameTemperature`] enum to ensure atomic operations.
     ///
     /// We use a synchronous / blocking mutex since operations should be held for very short periods
     /// of time, and also to ensure that operations on `FrameTemperature` are no asynchronous.

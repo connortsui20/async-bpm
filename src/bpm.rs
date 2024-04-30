@@ -1,8 +1,14 @@
 //! This module contains the declaration and implementation of the [`BufferPoolManager`] type.
 //!
-//! TODO
+//! This buffer pool manager has an asynchronous implementation that is built on top of an
+//! asynchronous disk / permanent storage manager, which is itself built on top of the Linux
+//! `io_uring` interface.
+//!
+//! The goal for this buffer pool manager is to exploit parallelism as much as possible by limiting
+//! the use of any global latches or single points of contention for the entire system. This means
+//! that several parts of the system are implemented quite differently from how a traditional buffer
+//! pool manager would work.
 
-use crate::disk::disk_manager::DISK_MANAGER;
 use crate::{
     disk::{
         disk_manager::{DiskManager, DiskManagerHandle},
@@ -25,7 +31,7 @@ use tokio::{
 };
 
 /// The global buffer pool manager instance.
-pub static BPM: OnceLock<BufferPoolManager> = OnceLock::new();
+static BPM: OnceLock<BufferPoolManager> = OnceLock::new();
 
 /// A parallel Buffer Pool Manager that manages bringing logical pages from disk into memory via
 /// shared and fixed buffer frames.
@@ -125,6 +131,11 @@ impl BufferPoolManager {
             .expect("Tried to initialize the buffer pool manager more than once");
     }
 
+    pub fn get() -> &'static Self {
+        BPM.get()
+            .expect("Tried to get a reference to the BPM before it was initialized")
+    }
+
     /// Gets the number of fixed frames the buffer pool manages.
     pub fn num_frames(&self) -> usize {
         self.num_frames
@@ -148,7 +159,7 @@ impl BufferPoolManager {
         // First check if it exists already
         let mut pages_guard = self.pages.write().await;
         if let Some(page) = pages_guard.get(pid) {
-            return PageHandle::new(page.clone(), DISK_MANAGER.get().unwrap().create_handle());
+            return PageHandle::new(page.clone(), DiskManager::get().create_handle());
         }
 
         // Create the new page and update the global map of pages
@@ -160,7 +171,7 @@ impl BufferPoolManager {
         pages_guard.insert(*pid, page.clone());
 
         // Create the page handle and return
-        PageHandle::new(page, DISK_MANAGER.get().unwrap().create_handle())
+        PageHandle::new(page, DiskManager::get().create_handle())
     }
 
     /// Gets a thread-local page handle of the buffer pool manager, returning a [`PageHandle`] to
@@ -179,12 +190,12 @@ impl BufferPoolManager {
             }
         };
 
-        PageHandle::new(page, DISK_MANAGER.get().unwrap().create_handle())
+        PageHandle::new(page, DiskManager::get().create_handle())
     }
 
     /// Creates a thread-local [`DiskManagerHandle`] to the inner [`DiskManager`].
     pub fn get_disk_manager(&self) -> DiskManagerHandle {
-        DISK_MANAGER.get().unwrap().create_handle()
+        DiskManager::get().create_handle()
     }
 
     /// Creates a `tokio` thread-local [`Runtime`] that works with
