@@ -12,6 +12,8 @@ use tracing::{info, trace, Level};
 #[test]
 #[ignore]
 fn test_bpm_threads() {
+    std::fs::remove_file("db.test").unwrap();
+
     let log_file = File::create("test_bpm_threads.log").unwrap();
 
     let stdout_subscriber = tracing_subscriber::fmt()
@@ -28,9 +30,11 @@ fn test_bpm_threads() {
 
     const THREADS: usize = 4;
 
-    BufferPoolManager::initialize(16, THREADS * 2);
+    BufferPoolManager::initialize(16, THREADS * 4);
 
     let bpm = BPM.get().unwrap();
+
+    debug!("Testing test_bpm_threads");
 
     // Spawn all threads
     thread::scope(|s| {
@@ -45,9 +49,7 @@ fn test_bpm_threads() {
                     let ph = bpm.get_page(&pid).await;
 
                     {
-                        debug!("1st attempting to write {}", pid);
                         let mut guard = ph.write().await;
-                        debug!("1st got guard for {}", pid);
                         guard.deref_mut().fill(b' ' + index);
                         guard.flush().await;
                     }
@@ -63,9 +65,7 @@ fn test_bpm_threads() {
                     let ph = bpm.get_page(&pid).await;
 
                     {
-                        debug!("2nd attempting to write {}", pid);
                         let mut guard = ph.write().await;
-                        debug!("2nd got guard for {}", pid);
                         guard.deref_mut().fill(b' ' + index);
                         guard.flush().await;
                     }
