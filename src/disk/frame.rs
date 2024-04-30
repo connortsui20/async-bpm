@@ -9,7 +9,7 @@
 //! pre-determined groups of frames without having to manage which logical pages are in memory or
 //! not in memory.
 
-use super::{disk_manager::DiskManager, eviction::EvictionState};
+use super::eviction::EvictionState;
 use crate::page::{PageRef, WritePageGuard, PAGE_SIZE};
 use async_channel::{Receiver, Sender};
 use futures::future;
@@ -182,8 +182,6 @@ impl FrameGroup {
     /// Runs the second chance / clock algorithm on all of the [`Frame`]s in this `FrameGroup`, and
     /// then evicts all of the frames that have been cooled twice.
     pub async fn cool(&self) {
-        let dmh = DiskManager::get().create_handle();
-
         let mut eviction_pages: Vec<PageRef> = Vec::with_capacity(FRAME_GROUP_SIZE);
 
         // Cool all of the frames, recording a frame if it is already cool
@@ -201,15 +199,12 @@ impl FrameGroup {
         let futures: Vec<_> = eviction_pages
             .iter()
             .map(|page| {
-                // Note that this is cheap to clone
-                let dmh = dmh.clone();
-
                 // Return a future that can be run concurrently with other eviction futures later
                 async move {
                     // If we cannot get the write guard immediately, then someone else has it and we
                     // don't need to evict this frame now.
                     if let Ok(guard) = page.inner.try_write() {
-                        let write_guard = WritePageGuard::new(page.pid, guard, dmh);
+                        let write_guard = WritePageGuard::new(page.pid, guard);
 
                         let frame = write_guard.evict().await;
 
