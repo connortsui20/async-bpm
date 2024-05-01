@@ -119,7 +119,8 @@ impl PageHandle {
         let frame_group = bpm.get_random_frame_group();
 
         // Wait for a free frame
-        let frame = frame_group.get_free_frame(self.page.clone()).await;
+        let frame = frame_group.get_free_frame().await;
+        frame.set_page_owner(self.page.clone());
 
         // Read the data in from disk via our disk manager handle
         let frame = self

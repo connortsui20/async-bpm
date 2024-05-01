@@ -167,10 +167,9 @@ impl FrameGroup {
     ///
     /// This function will evict other frames in this `FrameGroup` if there are no free frames
     /// available.
-    pub async fn get_free_frame(&self, page: PageRef) -> Frame {
+    pub async fn get_free_frame(&self) -> Frame {
         loop {
             if let Ok(frame) = self.free_frames.1.try_recv() {
-                self.frame_states[frame.group_index].set_owner(page);
                 return frame;
             }
 
