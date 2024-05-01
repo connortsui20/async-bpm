@@ -5,16 +5,12 @@ use async_bpm::{
 use rand::distributions::Bernoulli;
 use rand::{distributions::Distribution, Rng};
 use std::{
-    fs::File,
     ops::{Deref, DerefMut},
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Mutex,
-    },
+    sync::atomic::{AtomicUsize, Ordering},
     thread,
 };
 use tokio::task::LocalSet;
-use tracing::{trace, Level};
+use tracing::trace;
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -23,38 +19,22 @@ const GIGABYTE_PAGES: usize = GIGABYTE / PAGE_SIZE;
 
 #[test]
 fn bench() {
-    // const THREADS: usize = 32;
-    // const TASKS: usize = 64; // tasks per thread
-    // const ITERATIONS: usize = 64; // iterations per task
+    const THREADS: usize = 16;
+    const TASKS: usize = 32; // tasks per thread
+    const OPERATIONS: usize = 1 << 20;
 
-    // const FRAMES: usize = 2 * GIGABYTE_PAGES;
-    // const DISK_PAGES: usize = 8 * GIGABYTE_PAGES;
+    const THREAD_OPERATIONS: usize = OPERATIONS / THREADS;
+    const ITERATIONS: usize = THREAD_OPERATIONS / TASKS; // iterations per task
 
-    const THREADS: usize = 32;
-    const TASKS: usize = 1; // tasks per thread
-    const ITERATIONS: usize = 64; // iterations per task
-
-    const FRAMES: usize = 128;
-    const DISK_PAGES: usize = 1024;
-
-    let log_file = File::create("bench.log").unwrap();
-
-    let stdout_subscriber = tracing_subscriber::fmt()
-        .compact()
-        .with_file(true)
-        .with_line_number(true)
-        .with_thread_ids(true)
-        .with_target(false)
-        .without_time()
-        .with_max_level(Level::TRACE)
-        .with_writer(Mutex::new(log_file))
-        .finish();
-    tracing::subscriber::set_global_default(stdout_subscriber).unwrap();
+    const FRAMES: usize = GIGABYTE_PAGES;
+    const DISK_PAGES: usize = 32 * GIGABYTE_PAGES;
 
     BufferPoolManager::initialize(FRAMES, DISK_PAGES);
     let bpm = BufferPoolManager::get();
 
-    let coin = Bernoulli::new(0.0).unwrap();
+    let coin = Bernoulli::new(0.2).unwrap();
+
+    println!("Operations: {OPERATIONS}");
 
     // Spawn all threads
     thread::scope(|s| {
@@ -109,6 +89,14 @@ fn bench() {
                 rt.block_on(local);
             });
         }
+
+        s.spawn(|| {
+            let duration = std::time::Duration::from_secs(1);
+            while COUNTER.load(Ordering::SeqCst) < THREADS * TASKS * ITERATIONS {
+                println!("Counter is at: {:?}", COUNTER);
+                std::thread::sleep(duration);
+            }
+        });
     });
 
     assert_eq!(COUNTER.load(Ordering::SeqCst), THREADS * TASKS * ITERATIONS);
