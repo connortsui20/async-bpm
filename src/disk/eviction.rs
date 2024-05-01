@@ -84,7 +84,8 @@ impl EvictionState {
     ///
     /// If the state is [`Hot`](FrameTemperature::Hot), then this function cools it down to be
     /// [`Cool`](FrameTemperature::Cool), and if it was already [`Cool`](FrameTemperature::Cool),
-    /// then this function will cool it down further to [`Cold`](FrameTemperature::Cold).
+    /// then this function does nothing. It is on the caller to deal with eviction of the
+    /// [`Cool`](FrameTemperature::Cool) page via the [`PageRef`] that is returned.
     ///
     /// If the state transitions to [`Cold`](FrameTemperature::Cold), this function will return the
     /// [`PageRef`] that it used to hold.
@@ -99,11 +100,7 @@ impl EvictionState {
                 *guard = FrameTemperature::Cool(page.clone());
                 None
             }
-            FrameTemperature::Cool(page) => {
-                let page = page.clone();
-                *guard = FrameTemperature::Cold;
-                Some(page)
-            }
+            FrameTemperature::Cool(page) => Some(page.clone()),
             FrameTemperature::Cold => None,
         }
     }
