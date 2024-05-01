@@ -1,6 +1,10 @@
 use async_bpm::{bpm::BufferPoolManager, page::PageId};
+use rand::Rng;
 use std::fs::File;
+use std::ops::Deref;
 use std::ops::DerefMut;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
@@ -70,6 +74,62 @@ fn test_bpm_threads() {
             });
         }
     });
+}
+
+#[test]
+fn test_simple() {
+    const ITERATIONS: usize = 96; // iterations per task
+
+    const FRAMES: usize = 64;
+    const DISK_PAGES: usize = 256;
+
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    let log_file = File::create("bench.log").unwrap();
+
+    let stdout_subscriber = tracing_subscriber::fmt()
+        .compact()
+        .with_file(true)
+        .with_line_number(true)
+        .with_thread_ids(true)
+        .with_target(false)
+        .without_time()
+        .with_max_level(Level::TRACE)
+        .with_writer(Mutex::new(log_file))
+        .finish();
+    tracing::subscriber::set_global_default(stdout_subscriber).unwrap();
+
+    BufferPoolManager::initialize(FRAMES, DISK_PAGES);
+    let bpm = BufferPoolManager::get();
+
+    let rt = bpm.build_thread_runtime();
+
+    let local = LocalSet::new();
+
+    local.spawn_local(async move {
+        let mut rng = rand::thread_rng();
+
+        for iteration in 0..ITERATIONS {
+            let id = rng.gen_range(0..DISK_PAGES) as u64;
+            let pid = PageId::new(id);
+            let ph = bpm.get_page(&pid).await;
+
+            trace!("Start iteration {} ({})", iteration, pid);
+
+            let guard = ph.read().await;
+            let slice = guard.deref();
+            std::hint::black_box(slice);
+            drop(guard);
+
+            COUNTER.fetch_add(1, Ordering::SeqCst);
+
+            trace!("Finish iteration {} ({})", iteration, pid);
+        }
+    });
+
+    rt.block_on(local);
+
+    assert_eq!(COUNTER.load(Ordering::SeqCst), ITERATIONS);
 }
 
 #[test]
