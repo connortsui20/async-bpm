@@ -198,11 +198,14 @@ impl FrameGroup {
             // If we cannot get the write guard immediately, then someone else has it and we don't
             // need to evict this frame now.
             if let Ok(guard) = page.inner.try_write() {
-                let write_guard = WritePageGuard::new(page.pid, guard);
+                // Someone might have gotten in front of us and already evicted this page
+                if guard.is_some() {
+                    let write_guard = WritePageGuard::new(page.pid, guard);
 
-                let frame = write_guard.evict().await;
+                    let frame = write_guard.evict().await;
 
-                self.free_frames.0.send(frame).await.unwrap();
+                    self.free_frames.0.send(frame).await.unwrap();
+                }
             }
         }
     }
