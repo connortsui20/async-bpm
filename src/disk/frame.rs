@@ -12,7 +12,6 @@
 use super::eviction::EvictionState;
 use crate::page::{PageRef, WritePageGuard, PAGE_SIZE};
 use async_channel::{Receiver, Sender};
-use futures::future;
 use std::{
     ops::{Deref, DerefMut},
     sync::Arc,
@@ -196,24 +195,16 @@ impl FrameGroup {
         }
 
         // Attempt to evict all of the already cool frames
-        let futures: Vec<_> = eviction_pages
-            .iter()
-            .map(|page| {
-                // Return a future that can be run concurrently with other eviction futures later
-                async move {
-                    // If we cannot get the write guard immediately, then someone else has it and we
-                    // don't need to evict this frame now.
-                    if let Ok(guard) = page.inner.try_write() {
-                        let write_guard = WritePageGuard::new(page.pid, guard);
+        for page in eviction_pages {
+            // If we cannot get the write guard immediately, then someone else has it and we don't
+            // need to evict this frame now.
+            if let Ok(guard) = page.inner.try_write() {
+                let write_guard = WritePageGuard::new(page.pid, guard);
 
-                        let frame = write_guard.evict().await;
+                let frame = write_guard.evict().await;
 
-                        self.free_frames.0.send(frame).await.unwrap();
-                    }
-                }
-            })
-            .collect();
-
-        future::join_all(futures).await;
+                self.free_frames.0.send(frame).await.unwrap();
+            }
+        }
     }
 }
