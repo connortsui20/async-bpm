@@ -82,7 +82,14 @@ impl Future for OpInner {
 #[derive(Debug)]
 pub struct Op {
     /// Ownership over the `OpInner` value is moved to a new tokio task when an `Op` is dropped.
-    pub(super) inner: Option<OpInner>,
+    inner: Option<OpInner>,
+}
+
+impl Op {
+    /// Creates a new `Op`.
+    pub(super) fn new(inner: OpInner) -> Self {
+        Self { inner: Some(inner) }
+    }
 }
 
 impl Drop for Op {

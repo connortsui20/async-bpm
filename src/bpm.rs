@@ -1,30 +1,37 @@
+//! This module contains the declaration and implementation of the [`BufferPoolManager`] type.
+//!
+//! This buffer pool manager has an asynchronous implementation that is built on top of an
+//! asynchronous disk / permanent storage manager, which is itself built on top of the Linux
+//! `io_uring` interface.
+//!
+//! The goal for this buffer pool manager is to exploit parallelism as much as possible by limiting
+//! the use of any global latches or single points of contention for the entire system. This means
+//! that several parts of the system are implemented quite differently from how a traditional buffer
+//! pool manager would work.
+
 use crate::{
     disk::{
         disk_manager::{DiskManager, DiskManagerHandle},
-        frame::Frame,
+        frame::{FrameGroup, FrameGroupRef, FRAME_GROUP_SIZE},
     },
-    page::{
-        eviction::{Temperature, TemperatureState},
-        Page, PageHandle, PageId, PageRef, PAGE_SIZE,
-    },
+    page::{Page, PageHandle, PageId, PageRef, PAGE_SIZE},
 };
-use async_channel::{Receiver, Sender};
 use core::slice;
-use futures::future;
+use rand::Rng;
 use send_wrapper::SendWrapper;
 use std::{
-    collections::{HashMap, HashSet},
-    io::{IoSlice, IoSliceMut},
-    ops::Deref,
+    collections::HashMap,
+    io::IoSliceMut,
     rc::Rc,
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
 use tokio::{
     runtime::{Builder, Runtime},
-    sync::{Mutex, RwLock},
-    task::LocalSet,
+    sync::RwLock,
 };
-use tracing::{debug, info, trace, warn};
+
+/// The global buffer pool manager instance.
+static BPM: OnceLock<BufferPoolManager> = OnceLock::new();
 
 /// A parallel Buffer Pool Manager that manages bringing logical pages from disk into memory via
 /// shared and fixed buffer frames.
@@ -34,78 +41,100 @@ pub struct BufferPoolManager {
     num_frames: usize,
 
     /// A mapping between unique [`PageId`]s and shared [`PageRef`] handles.
-    pub(crate) pages: RwLock<HashMap<PageId, PageRef>>,
+    pages: RwLock<HashMap<PageId, PageRef>>,
 
-    /// A collection of [`PageId`]s that currently have their data in memory.
-    ///
-    /// Used to help find pages to evict from memory. The [`BufferPoolManager`] must maintain this
-    /// [`HashSet`] by ensuring it is synced with the pages that are brought into memory.
-    pub(crate) active_pages: Mutex<HashSet<PageId>>,
-
-    /// A channel of free, owned buffer [`Frame`]s.
-    pub(crate) free_frames: (Sender<Frame>, Receiver<Frame>),
-
-    /// The manager of reading and writing [`Page`] data via [`Frame`]s.
-    pub(crate) disk_manager: Arc<DiskManager>,
+    /// Groups of frames used to demarcate eviction zones.
+    frame_groups: Box<[FrameGroupRef]>,
 }
 
 impl BufferPoolManager {
-    /// Constructs a new buffer pool manager with the given number of `PAGE_SIZE`ed buffer frames.
+    /// Constructs a new buffer pool manager with the given number of [`PAGE_SIZE`]ed buffer frames.
     ///
     /// The argument `capacity` should be the starting number of logical pages the user of the
     /// [`BufferPoolManager`] wishes to use, as it will allocate enough space on disk to initially
-    /// accommodate that number.
-    pub fn new(num_frames: usize, capacity: usize) -> Self {
-        // All frames start out as free
-        let (tx, rx) = async_channel::bounded(num_frames);
+    /// accommodate that number. TODO this is subject to change once the disk manager improves.
+    ///
+    /// This function will create two copies of the buffers allocated, 1 copy for user access
+    /// through `Frame`s and `FrameGroup`s, and another copy for kernel access by registering
+    /// the buffers into the `io_uring` instance via
+    /// [`register_buffers`](io_uring::Submitter::register_buffers).
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if `num_frames` is not a multiple of
+    /// [`FRAME_GROUP_SIZE`]((crate::disk::frame::FRAME_GROUP_SIZE)).
+    pub fn initialize(num_frames: usize, capacity: usize) {
+        assert!(
+            BPM.get().is_none(),
+            "Tried to initialize a BufferPoolManager more than once"
+        );
+        assert!(num_frames != 0);
+        assert_eq!(num_frames % FRAME_GROUP_SIZE, 0);
+        let num_groups = num_frames / FRAME_GROUP_SIZE;
 
         // Allocate all of the buffer memory up front
         let bytes: &'static mut [u8] = vec![0u8; num_frames * PAGE_SIZE].leak();
 
-        // Note: should use `as_chunks_unchecked_mut()` instead once it is stabilized:
-        // https://doc.rust-lang.org/std/primitive.slice.html#method.as_chunks_unchecked_mut
+        // Divide the memory up into `PAGE_SIZE` chunks
         let slices: Vec<&'static mut [u8]> = bytes.chunks_exact_mut(PAGE_SIZE).collect();
         assert_eq!(slices.len(), num_frames);
 
-        // Create the registerable buffers, as well as create the owned `Frame`s and send them down
-        // the channel for future `Page`s to take ownership of
-        let register_buffers = slices
+        // Create two copies of a vector of `IoSliceMut` buffer pointers
+        let (mut buffers, registerable_buffers): (Vec<_>, Vec<_>) = slices
             .into_iter()
             .map(|buf| {
-                // Safety: Since we never actually read from the buffer pointers (intended for being
-                // registered in an `io_uring` instance), it is safe to have a shared slice
-                // reference exist at the same time as the exclusive mutable slice reference that is
-                // being stored through the `IoSliceMut` and `Frame`.
-                let register_slice = unsafe { slice::from_raw_parts(buf.as_ptr(), PAGE_SIZE) };
+                // Safety: Since these buffers are only accessed under mutual exclusion and are
+                // never accessed when the kernel has ownership over the `Frames`, this is safe to
+                // create and register into `io_uring` instances.
+                let register_slice =
+                    unsafe { slice::from_raw_parts_mut(buf.as_mut_ptr(), PAGE_SIZE) };
 
-                {
-                    // Create the owned `Frame`
-                    let owned_buf = IoSliceMut::new(buf);
-                    let frame = Frame::new(owned_buf);
-
-                    // Add the `Frame` to the channel of free frames
-                    tx.send_blocking(frame)
-                        .expect("Was unable to send the initial frames onto the global free list");
-                }
-
-                IoSlice::new(register_slice)
+                (buf, IoSliceMut::new(register_slice))
             })
-            .collect::<Vec<IoSlice<'static>>>()
-            .into_boxed_slice();
+            .collect::<Vec<_>>()
+            .into_iter()
+            .unzip();
+        assert_eq!(buffers.len(), num_frames);
 
-        let disk_manager = Arc::new(DiskManager::new(
-            capacity,
-            "db.test".to_string(),
-            register_buffers,
-        ));
+        // Create the frame groups, taking the groups of buffers off the back of the buffers vector
+        let frame_groups: Vec<FrameGroupRef> = (0..num_groups)
+            .map(|i| {
+                let buffers: Vec<&'static mut [u8]> =
+                    buffers.split_off(buffers.len() - FRAME_GROUP_SIZE);
+                assert_eq!(buffers.len(), FRAME_GROUP_SIZE, "Not equal at index {i}");
 
-        Self {
+                FrameGroup::new(buffers, num_groups - i - 1)
+            })
+            .collect();
+        assert_eq!(frame_groups.len(), num_frames / FRAME_GROUP_SIZE);
+        assert!(
+            buffers.is_empty(),
+            "All buffers should have been moved into frame groups"
+        );
+
+        // Create the bpm and set it as the global static bpm instance
+        BPM.set(Self {
             num_frames,
+            frame_groups: frame_groups.into_boxed_slice(),
             pages: RwLock::new(HashMap::with_capacity(num_frames)),
-            active_pages: Mutex::new(HashSet::with_capacity(num_frames)),
-            free_frames: (tx, rx),
-            disk_manager,
-        }
+        })
+        .expect("Tried to initialize the buffer pool manager more than once");
+
+        // This copy will only be used to register into the `io_uring` instance, and never accessed
+        let registerable_buffers = registerable_buffers.into_boxed_slice();
+
+        // Initialize the global `DiskManager` instance
+        DiskManager::initialize(capacity, registerable_buffers);
+    }
+
+    /// Retrieve a static reference to the global buffer pool manager.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if it is called before a call to [`BufferPoolManager::initialize`].
+    pub fn get() -> &'static Self {
+        BPM.get()
+            .expect("Tried to get a reference to the BPM before it was initialized")
     }
 
     /// Gets the number of fixed frames the buffer pool manages.
@@ -113,44 +142,44 @@ impl BufferPoolManager {
         self.num_frames
     }
 
-    /// Creates a thread-local page handle of the buffer pool manager, returning a `PageHandle` to
+    /// Returns a pointer to a random group of frames.
+    ///
+    /// Intended for use by an eviction algorithm.
+    pub(crate) fn get_random_frame_group(&self) -> FrameGroupRef {
+        let mut rng = rand::thread_rng();
+        let index = rng.gen_range(0..self.frame_groups.len());
+
+        self.frame_groups[index].clone()
+    }
+
+    /// Creates a thread-local page handle of the buffer pool manager, returning a [`PageHandle`] to
     /// the logical page data.
     ///
     /// If the page already exists, this function will return that instead.
-    async fn create_page(self: &Arc<Self>, pid: &PageId) -> PageHandle {
-        info!("Creating {} Handle", pid);
-
+    async fn create_page(&self, pid: &PageId) -> PageHandle {
         // First check if it exists already
         let mut pages_guard = self.pages.write().await;
         if let Some(page) = pages_guard.get(pid) {
-            return PageHandle::new(
-                page.clone(),
-                self.clone(),
-                self.disk_manager.create_handle(),
-            );
+            return PageHandle::new(page.clone(), DiskManager::get().create_handle());
         }
 
         // Create the new page and update the global map of pages
         let page = Arc::new(Page {
             pid: *pid,
-            eviction_state: Temperature::new(TemperatureState::Cold),
             inner: RwLock::new(None),
-            bpm: self.clone(),
         });
 
         pages_guard.insert(*pid, page.clone());
 
         // Create the page handle and return
-        PageHandle::new(page, self.clone(), self.disk_manager.create_handle())
+        PageHandle::new(page, DiskManager::get().create_handle())
     }
 
-    /// Gets a thread-local page handle of the buffer pool manager, returning a `PageHandle` to
+    /// Gets a thread-local page handle of the buffer pool manager, returning a [`PageHandle`] to
     /// the logical page data.
     ///
     /// If the page does not already exist, this function will create it and then return it.
-    pub async fn get_page(self: &Arc<Self>, pid: &PageId) -> PageHandle {
-        debug!("Getting {} Handle", pid);
-
+    pub async fn get_page(&self, pid: &PageId) -> PageHandle {
         let pages_guard = self.pages.read().await;
 
         // Get the page if it exists, otherwise create it and return
@@ -162,75 +191,24 @@ impl BufferPoolManager {
             }
         };
 
-        PageHandle::new(page, self.clone(), self.disk_manager.create_handle())
+        PageHandle::new(page, DiskManager::get().create_handle())
     }
 
-    // Creates a thread-local [`DiskManagerHandle`] to the inner [`DiskManager`].
+    /// Creates a thread-local [`DiskManagerHandle`] to the inner [`DiskManager`].
     pub fn get_disk_manager(&self) -> DiskManagerHandle {
-        self.disk_manager.create_handle()
+        DiskManager::get().create_handle()
     }
 
-    /// Continuously runs the eviction algorithm in a loop.
-    ///
-    /// This `Future` should be placed onto the task queue of every worker so that it does not stall
-    /// waiting for other worker threads to manually release buffers.
-    pub async fn evictor(self: &Arc<Self>) -> ! {
-        let bpm = self.clone();
-
-        loop {
-            // Pages referenced in the `active_pages` list are guaranteed to own `Frame`s
-            let Ok(active_guard) = bpm.active_pages.try_lock() else {
-                warn!("Contention on Active Pages in Evictor");
-                tokio::task::yield_now().await;
-                continue;
-            };
-
-            let pids: Vec<_> = active_guard.deref().iter().copied().collect();
-
-            drop(active_guard);
-
-            if pids.is_empty() {
-                tokio::task::yield_now().await;
-                continue;
-            }
-
-            info!("Active pages: {:?}", pids);
-
-            // Run all eviction futures concurrently
-            future::join_all(pids.iter().map(|pid| async {
-                let ph = self.get_page(pid).await;
-                ph.cool().await;
-            }))
-            .await;
-
-            tokio::task::yield_now().await;
-        }
-    }
-
-    pub fn spawn_evictor(self: &Arc<Self>) {
-        let bpm_clone = self.clone();
-        let bpm_evictor = self.clone();
-
-        std::thread::spawn(move || {
-            let rt = bpm_clone.build_thread_runtime();
-
-            let local = LocalSet::new();
-            local.spawn_local(async move {
-                bpm_evictor.evictor().await;
-            });
-
-            rt.block_on(local);
-        });
-    }
-
-    pub fn build_thread_runtime(self: &Arc<Self>) -> Runtime {
+    /// Creates a `tokio` thread-local [`Runtime`] that works with
+    /// [`IoUringAsync`](crate::io::IoUringAsync) by calling `submit` and `poll` every time a worker
+    /// thread gets parked.
+    pub fn build_thread_runtime(&self) -> Runtime {
         let dmh = self.get_disk_manager();
         let uring = Rc::new(dmh.get_uring());
         let uring_daemon = SendWrapper::new(uring.clone());
 
         Builder::new_current_thread()
             .on_thread_park(move || {
-                trace!("Thread parking");
                 uring_daemon
                     .submit()
                     .expect("Was unable to submit `io_uring` operations");

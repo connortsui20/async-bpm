@@ -1,30 +1,44 @@
 //! Wrappers around `tokio`'s `RwLockReadGuard` and `RwLockWriteGuard`, dedicated for pages of data.
 
 use super::PageId;
-use crate::disk::{disk_manager::DiskManagerHandle, frame::Frame};
+use crate::disk::{disk_manager::DiskManager, frame::Frame};
 use std::ops::{Deref, DerefMut};
 use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
-use tracing::debug;
 
-/// A read guard for a [`Page`](super::Page)'s [`Frame`], which pins the page's data in memory.
+/// A read guard for a [`Page`](super::Page)'s `Frame`, which pins the page's data in memory.
 ///
 /// When this guard is dereferenced, it is guaranteed to point to valid and correct page data.
 ///
 /// This guard can only be dereferenced in read mode, but other tasks (potentially on different
 /// worker threads) are allowed to read from this same page.
 pub struct ReadPageGuard<'a> {
-    pid: PageId,
+    /// The unique page ID of the page this guard read protects. TODO Does not have a use yet...
+    _pid: PageId,
+
+    /// The `RwLock` read guard of the optional frame, that _must_ be the [`Some`] variant.
+    ///
+    /// The only reason that this guard protects an `Option<Frame>` instead of a `Frame` is because
+    /// the [`Page`](super::Page) type may have the `None` variant. However, _we_ guarantee through
+    /// panics that a `ReadPageGuard` can only be constructed while the [`Page`](super::Page) has
+    /// ownership over a `Frame`, and thus can make the assumption that this is _always_ the `Some`
+    /// variant that holds an owned frame.
     guard: RwLockReadGuard<'a, Option<Frame>>,
 }
 
 impl<'a> ReadPageGuard<'a> {
+    /// Creates a new `ReadPageGuard`.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the `RwLockReadGuard` holds a `None` instead of a `Some(frame)`,
+    /// since we cannot have a page guard that points to nothing.
     pub(crate) fn new(pid: PageId, guard: RwLockReadGuard<'a, Option<Frame>>) -> Self {
         assert!(
             guard.deref().is_some(),
             "Cannot create a ReadPageGuard that does not own a Frame"
         );
 
-        Self { pid, guard }
+        Self { _pid: pid, guard }
     }
 }
 
@@ -39,63 +53,80 @@ impl<'a> Deref for ReadPageGuard<'a> {
     }
 }
 
-impl<'a> Drop for ReadPageGuard<'a> {
-    fn drop(&mut self) {
-        debug!("Dropping ReadPageGuard {}", self.pid);
-    }
-}
-
-/// A write guard for a [`Page`](super::Page)'s [`Frame`], which pins the page's data in memory.
+/// A write guard for a [`Page`](super::Page)'s `Frame`, which pins the page's data in memory.
 ///
 /// When this guard is dereferenced, it is guaranteed to point to valid and correct page data.
 ///
 /// This guard can be dereferenced in both read and write mode, and no other tasks or threads can
 /// access the page's data while a task has this guard.
 pub struct WritePageGuard<'a> {
+    /// The unique page ID of the page this guard read protects.
     pid: PageId,
-    pub(crate) guard: RwLockWriteGuard<'a, Option<Frame>>,
-    pub(crate) dm: DiskManagerHandle,
+
+    /// The `RwLock` write guard of the optional frame, that _must_ be the [`Some`] variant.
+    ///
+    /// The only reason that this guard protects an `Option<Frame>` instead of a `Frame` is because
+    /// the [`Page`](super::Page) type may have the `None` variant. However, _we_ guarantee through
+    /// panics that a `WritePageGuard` can only be constructed while the [`Page`](super::Page) has
+    /// ownership over a `Frame`, and thus can make the assumption that this is _always_ the `Some`
+    /// variant that holds an owned frame.
+    guard: RwLockWriteGuard<'a, Option<Frame>>,
 }
 
 impl<'a> WritePageGuard<'a> {
-    pub(crate) fn new(
-        pid: PageId,
-        guard: RwLockWriteGuard<'a, Option<Frame>>,
-        dm: DiskManagerHandle,
-    ) -> Self {
+    /// Creates a new `WritePageGuard`.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the `RwLockWriteGuard` holds a `None` instead of a
+    /// `Some(frame)`, since we cannot have a page guard that points to nothing.
+    pub(crate) fn new(pid: PageId, guard: RwLockWriteGuard<'a, Option<Frame>>) -> Self {
         assert!(
-            guard.deref().is_some(),
+            guard.is_some(),
             "Cannot create a WritePageGuard that does not own a Frame"
         );
 
-        Self { pid, guard, dm }
+        Self { pid, guard }
     }
 
+    /// Flushes a page's data out to disk.
     pub async fn flush(&mut self) {
-        debug!("Flushing {}", self.pid);
+        assert!(self.guard.is_some());
 
-        if self.guard.is_none() {
-            // There is nothing for us to flush
-            return;
-        }
-
+        // Temporarily take ownership of the frame from the guard
         let frame = self.guard.take().unwrap();
-
-        let pid = frame
-            .owner
-            .as_ref()
-            .expect("WritePageGuard protects a Frame that does not have an Page Owner")
-            .pid;
+        let page = frame
+            .get_page_owner()
+            .expect("Tried to flush a frame that had no page owner");
 
         // Write the data out to disk
-        let frame = self
-            .dm
-            .write_from(pid, frame)
+        let frame = DiskManager::get()
+            .create_handle()
+            .write_from(self.pid, frame)
             .await
-            .unwrap_or_else(|_| panic!("Was unable to write data from page {} to disk", pid));
+            .unwrap_or_else(|_| panic!("Was unable to write data from page {} to disk", self.pid));
 
-        let res = self.guard.replace(frame);
-        assert!(res.is_none());
+        // Give ownership back to the guard
+        frame.set_page_owner(page);
+        self.guard.replace(frame);
+    }
+
+    /// Evicts the page from memory, consuming the guard in the process.
+    pub(crate) async fn evict(mut self) -> Frame {
+        assert!(self.guard.is_some());
+
+        // Take ownership over the frame and remove from the Page
+        let frame = self.guard.take().unwrap();
+        frame
+            .evict_page_owner()
+            .expect("Tried to evict a frame that had no page owner");
+
+        // Write the data out to disk
+        DiskManager::get()
+            .create_handle()
+            .write_from(self.pid, frame)
+            .await
+            .unwrap_or_else(|_| panic!("Was unable to write data from page {} to disk", self.pid))
     }
 }
 
@@ -116,11 +147,5 @@ impl<'a> DerefMut for WritePageGuard<'a> {
             .deref_mut()
             .as_mut()
             .expect("Somehow have a WritePageGuard without an owned frame")
-    }
-}
-
-impl<'a> Drop for WritePageGuard<'a> {
-    fn drop(&mut self) {
-        debug!("Dropping WritePageGuard {}", self.pid);
     }
 }

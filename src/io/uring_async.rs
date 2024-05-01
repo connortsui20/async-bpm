@@ -1,3 +1,5 @@
+//! An asynchronous wrapper around an `io_uring` instance with asynchronous methods.
+
 use super::op::{Lifecycle, Op, OpInner};
 use derivative::Derivative;
 use io_uring::{squeue::Entry as SqEntry, IoUring};
@@ -10,7 +12,7 @@ use std::{
     rc::Rc,
 };
 use tokio::io::unix::AsyncFd;
-use tracing::{trace, warn};
+use tracing::warn;
 
 /// The default number of `io_uring` submission entries.
 pub const IO_URING_DEFAULT_ENTRIES: u16 = 1 << 12; // 4096
@@ -23,7 +25,7 @@ pub const IO_URING_DEFAULT_ENTRIES: u16 = 1 << 12; // 4096
 pub struct IoUringAsync {
     /// The thread-local `io_uring` instance.
     #[derivative(Debug = "ignore")]
-    pub(crate) uring: Rc<RefCell<IoUring>>,
+    uring: Rc<RefCell<IoUring>>,
 
     /// A thread-local table of unique operation IDs mapped to current in-flight operation states.
     operations: Rc<RefCell<HashMap<u64, Lifecycle>>>,
@@ -55,7 +57,6 @@ impl IoUringAsync {
 
         loop {
             let mut guard = async_fd.readable().await.unwrap();
-            trace!("IoUringAsync listener woke up");
 
             guard.get_inner().poll();
             guard.clear_ready();
@@ -78,8 +79,6 @@ impl IoUringAsync {
     pub unsafe fn push(&self, entry: SqEntry) -> Op {
         let id = entry.get_user_data();
 
-        trace!("Pushing operation {id} onto IoUringAsync");
-
         let mut operations_guard = self.operations.borrow_mut();
 
         let index = operations_guard.insert(id, Lifecycle::Unsubmitted);
@@ -96,16 +95,15 @@ impl IoUringAsync {
         // Safety: We must ensure that the parameters of this entry are valid for the entire
         // duration of the operation, and this is guaranteed by this function's safety contract.
         while unsafe { submission_queue.push(&entry).is_err() } {
+            warn!("Submission queue was full");
             // Help make progress
             submission_queue.sync();
         }
 
-        Op {
-            inner: Some(OpInner {
-                operations: self.operations.clone(),
-                id,
-            }),
-        }
+        Op::new(OpInner {
+            operations: self.operations.clone(),
+            id,
+        })
     }
 
     /// Submit all queued submission queue events to the kernel.
@@ -117,7 +115,6 @@ impl IoUringAsync {
     /// Ideally, this function should be called on the [`IoUringAsync`] instance every time a worker
     /// thread parks. For example, call `submit` from [`tokio::runtime::Builder::on_thread_park`].
     pub fn submit(&self) -> std::io::Result<usize> {
-        trace!("Submitting operations");
         self.uring.borrow().submit()
     }
 
@@ -130,8 +127,6 @@ impl IoUringAsync {
     /// [`IoUringAsync::push`] to observe the result of the operation, as well as remove it from the
     /// `HashMap` of current in-flight operations by [`Future`](std::future::Future).
     pub fn poll(&self) {
-        trace!("Polling operations");
-
         let mut uring_guard = self.uring.borrow_mut();
         let completion_queue = uring_guard.completion();
 
@@ -167,6 +162,7 @@ impl IoUringAsync {
         }
     }
 
+    /// Registers fixed buffers into the `IoUringAsync` instance to be shared with the kernel.
     pub fn register_buffers(&self, buffers: &[IoSlice<'static>]) {
         let ptr = buffers.as_ptr() as *const iovec;
 

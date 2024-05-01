@@ -1,17 +1,21 @@
 use async_bpm::{bpm::BufferPoolManager, page::PageId};
+use rand::Rng;
 use std::fs::File;
+use std::ops::Deref;
+use std::ops::DerefMut;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
-use std::{ops::DerefMut, sync::Arc};
 use tokio::sync::Barrier;
 use tokio::task::LocalSet;
+use tracing::debug;
 use tracing::{info, trace, Level};
 
 #[test]
 #[ignore]
 fn test_bpm_threads() {
-    trace!("Starting test_bpm_threads");
-
     let log_file = File::create("test_bpm_threads.log").unwrap();
 
     let stdout_subscriber = tracing_subscriber::fmt()
@@ -21,47 +25,114 @@ fn test_bpm_threads() {
         .with_thread_ids(true)
         .with_target(false)
         .without_time()
-        .with_max_level(Level::WARN)
+        .with_max_level(Level::TRACE)
         .with_writer(Mutex::new(log_file))
         .finish();
     tracing::subscriber::set_global_default(stdout_subscriber).unwrap();
 
-    const THREADS: usize = 96;
+    const THREADS: usize = 32;
 
-    let bpm = Arc::new(BufferPoolManager::new(2, THREADS * 2));
+    BufferPoolManager::initialize(64, THREADS * 2);
 
-    // Spawn the eviction thread / single task
-    let bpm_evictor = bpm.clone();
-    bpm_evictor.spawn_evictor();
+    let bpm = BufferPoolManager::get();
+
+    debug!("Testing test_bpm_threads");
 
     // Spawn all threads
     thread::scope(|s| {
         for i in 0..THREADS {
-            let bpm_clone = bpm.clone();
-
             s.spawn(move || {
-                let rt = bpm_clone.build_thread_runtime();
+                let rt = bpm.build_thread_runtime();
 
                 let local = LocalSet::new();
+
                 local.spawn_local(async move {
-                    let pid = PageId::new(i as u64);
-                    let ph = bpm_clone.get_page(&pid).await;
+                    let index = 2 * i as u8;
+                    let pid = PageId::new(index as u64);
+                    let ph = bpm.get_page(&pid).await;
 
-                    let mut guard = ph.write().await;
+                    {
+                        let mut guard = ph.write().await;
+                        guard.deref_mut().fill(b' ' + index);
+                        guard.flush().await;
+                    }
+                });
 
-                    guard.deref_mut().fill(b' ' + i as u8);
-                    guard.flush().await;
+                local.spawn_local(async move {
+                    let index = ((2 * i) + 1) as u8;
+                    let pid = PageId::new(index as u64);
+                    let ph = bpm.get_page(&pid).await;
 
-                    drop(guard);
-
-                    #[allow(clippy::empty_loop)]
-                    loop {}
+                    {
+                        let mut guard = ph.write().await;
+                        guard.deref_mut().fill(b' ' + index);
+                        guard.flush().await;
+                    }
                 });
 
                 rt.block_on(local);
             });
         }
     });
+}
+
+#[test]
+fn test_simple() {
+    const TASKS: usize = 2; // tasks per thread
+    const ITERATIONS: usize = 1024; // iterations per task
+
+    const FRAMES: usize = 64;
+    const DISK_PAGES: usize = 256;
+
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    let log_file = File::create("simple.log").unwrap();
+
+    let stdout_subscriber = tracing_subscriber::fmt()
+        .compact()
+        .with_file(true)
+        .with_line_number(true)
+        .with_thread_ids(true)
+        .with_target(false)
+        .without_time()
+        .with_max_level(Level::TRACE)
+        .with_writer(Mutex::new(log_file))
+        .finish();
+    tracing::subscriber::set_global_default(stdout_subscriber).unwrap();
+
+    BufferPoolManager::initialize(FRAMES, DISK_PAGES);
+    let bpm = BufferPoolManager::get();
+
+    let rt = bpm.build_thread_runtime();
+
+    let local = LocalSet::new();
+
+    for task in 0..TASKS {
+        local.spawn_local(async move {
+            let mut rng = rand::thread_rng();
+
+            for iteration in 0..ITERATIONS {
+                let id = rng.gen_range(0..DISK_PAGES) as u64;
+                let pid = PageId::new(id);
+                let ph = bpm.get_page(&pid).await;
+
+                trace!("Start iteration {} {} ({})", task, iteration, pid);
+
+                let guard = ph.read().await;
+                let slice = guard.deref();
+                std::hint::black_box(slice);
+                drop(guard);
+
+                COUNTER.fetch_add(1, Ordering::SeqCst);
+
+                trace!("Finish iteration {} {} ({})", task, iteration, pid);
+            }
+        });
+    }
+
+    rt.block_on(local);
+
+    assert_eq!(COUNTER.load(Ordering::SeqCst), TASKS * ITERATIONS);
 }
 
 #[test]
@@ -83,36 +154,32 @@ fn test_bpm_upwards() {
         .finish();
     tracing::subscriber::set_global_default(stdout_subscriber).unwrap();
 
-    const THREADS: usize = 95;
+    const THREADS: usize = 96;
+    BufferPoolManager::initialize(128, THREADS * 2);
 
-    let bpm = Arc::new(BufferPoolManager::new(128, THREADS * 2));
-
-    // Spawn the eviction thread / single task
-    let bpm_evictor = bpm.clone();
-    bpm_evictor.spawn_evictor();
+    let bpm = BufferPoolManager::get();
 
     // Spawn all threads
     thread::scope(|s| {
         let b = Arc::new(Barrier::new(THREADS));
 
         for i in 0..THREADS {
-            let bpm_clone = bpm.clone();
             let barrier = b.clone();
 
             s.spawn(move || {
-                let rt = bpm_clone.build_thread_runtime();
+                let rt = bpm.build_thread_runtime();
 
                 let local = LocalSet::new();
                 local.spawn_local(async move {
                     let pid1 = PageId::new(i as u64);
-                    let ph1 = bpm_clone.get_page(&pid1).await;
+                    let ph1 = bpm.get_page(&pid1).await;
 
                     let mut write_guard = ph1.write().await;
                     write_guard.deref_mut().fill(b' ' + i as u8);
                     write_guard.flush().await;
 
                     let pid2 = PageId::new((i + 1) as u64);
-                    let ph2 = bpm_clone.get_page(&pid2).await;
+                    let ph2 = bpm.get_page(&pid2).await;
 
                     // Check if the next thread has finished
                     loop {
