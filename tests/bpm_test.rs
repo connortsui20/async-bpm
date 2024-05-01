@@ -78,14 +78,15 @@ fn test_bpm_threads() {
 
 #[test]
 fn test_simple() {
-    const ITERATIONS: usize = 96; // iterations per task
+    const TASKS: usize = 2; // tasks per thread
+    const ITERATIONS: usize = 1024; // iterations per task
 
     const FRAMES: usize = 64;
     const DISK_PAGES: usize = 256;
 
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
-    let log_file = File::create("bench.log").unwrap();
+    let log_file = File::create("simple.log").unwrap();
 
     let stdout_subscriber = tracing_subscriber::fmt()
         .compact()
@@ -106,30 +107,32 @@ fn test_simple() {
 
     let local = LocalSet::new();
 
-    local.spawn_local(async move {
-        let mut rng = rand::thread_rng();
+    for task in 0..TASKS {
+        local.spawn_local(async move {
+            let mut rng = rand::thread_rng();
 
-        for iteration in 0..ITERATIONS {
-            let id = rng.gen_range(0..DISK_PAGES) as u64;
-            let pid = PageId::new(id);
-            let ph = bpm.get_page(&pid).await;
+            for iteration in 0..ITERATIONS {
+                let id = rng.gen_range(0..DISK_PAGES) as u64;
+                let pid = PageId::new(id);
+                let ph = bpm.get_page(&pid).await;
 
-            trace!("Start iteration {} ({})", iteration, pid);
+                trace!("Start iteration {} {} ({})", task, iteration, pid);
 
-            let guard = ph.read().await;
-            let slice = guard.deref();
-            std::hint::black_box(slice);
-            drop(guard);
+                let guard = ph.read().await;
+                let slice = guard.deref();
+                std::hint::black_box(slice);
+                drop(guard);
 
-            COUNTER.fetch_add(1, Ordering::SeqCst);
+                COUNTER.fetch_add(1, Ordering::SeqCst);
 
-            trace!("Finish iteration {} ({})", iteration, pid);
-        }
-    });
+                trace!("Finish iteration {} {} ({})", task, iteration, pid);
+            }
+        });
+    }
 
     rt.block_on(local);
 
-    assert_eq!(COUNTER.load(Ordering::SeqCst), ITERATIONS);
+    assert_eq!(COUNTER.load(Ordering::SeqCst), TASKS * ITERATIONS);
 }
 
 #[test]
