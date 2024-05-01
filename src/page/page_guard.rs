@@ -95,6 +95,9 @@ impl<'a> WritePageGuard<'a> {
 
         // Temporarily take ownership of the frame from the guard
         let frame = self.guard.take().unwrap();
+        let page = frame
+            .get_page_owner()
+            .expect("Tried to flush a frame that had no page owner");
 
         // Write the data out to disk
         let frame = DiskManager::get()
@@ -104,6 +107,7 @@ impl<'a> WritePageGuard<'a> {
             .unwrap_or_else(|_| panic!("Was unable to write data from page {} to disk", self.pid));
 
         // Give ownership back to the guard
+        frame.set_page_owner(page);
         self.guard.replace(frame);
     }
 
@@ -111,12 +115,18 @@ impl<'a> WritePageGuard<'a> {
     pub(crate) async fn evict(mut self) -> Frame {
         assert!(self.guard.is_some());
 
-        self.flush().await;
-
+        // Take ownership over the frame and remove from the Page
         let frame = self.guard.take().unwrap();
-        frame.evict_page_owner().unwrap();
-
         frame
+            .evict_page_owner()
+            .expect("Tried to evict a frame that had no page owner");
+
+        // Write the data out to disk
+        DiskManager::get()
+            .create_handle()
+            .write_from(self.pid, frame)
+            .await
+            .unwrap_or_else(|_| panic!("Was unable to write data from page {} to disk", self.pid))
     }
 }
 
