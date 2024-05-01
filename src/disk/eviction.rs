@@ -11,7 +11,7 @@ pub struct EvictionState {
     ///
     /// We use a synchronous / blocking mutex since operations should be held for very short periods
     /// of time, and also to ensure that operations on `FrameTemperature` are not asynchronous.
-    pub inner: Mutex<FrameTemperature>,
+    inner: Mutex<FrameTemperature>,
 }
 
 /// The enum representing the possible values for [`EvictionState`].
@@ -19,7 +19,7 @@ pub struct EvictionState {
 /// The reason this is separate from the [`EvictionState`] struct is because we cannot represent do
 /// atomic operations on enums in Rust.
 #[derive(Debug)]
-pub enum FrameTemperature {
+enum FrameTemperature {
     /// Represents a frequently / recently accessed [`Frame`](super::frame::Frame) that currently
     /// holds a [`Page`](crate::page::Page)'s data.
     Hot(PageRef),
@@ -41,7 +41,7 @@ impl Default for EvictionState {
 
 impl EvictionState {
     /// Updates the eviction state after this frame has been accessed.
-    pub fn record_access(&self) {
+    pub(super) fn record_access(&self) {
         let mut guard = self
             .inner
             .lock()
@@ -56,7 +56,7 @@ impl EvictionState {
 
     /// Atomically sets the temperature as [`FrameTemperature::Hot`] and then stores the page that
     /// owns the [`Frame`](super::frame::Frame) into the state.
-    pub fn set_owner(&self, page: PageRef) {
+    pub(super) fn set_owner(&self, page: PageRef) {
         let mut guard = self
             .inner
             .lock()
@@ -67,7 +67,7 @@ impl EvictionState {
 
     /// Atomically loads the [`Page`](crate::page::Page) that owns the
     /// [`Frame`](super::frame::Frame), if an owner exists.
-    pub fn get_owner(&self) -> Option<PageRef> {
+    pub(super) fn get_owner(&self) -> Option<PageRef> {
         let guard = self
             .inner
             .lock()
@@ -88,7 +88,7 @@ impl EvictionState {
     ///
     /// If the state transitions to [`Cold`](FrameTemperature::Cold), this function will return the
     /// [`PageRef`] that it used to hold.
-    pub fn cool(&self) -> Option<PageRef> {
+    pub(super) fn cool(&self) -> Option<PageRef> {
         let mut guard = self
             .inner
             .lock()
@@ -110,7 +110,7 @@ impl EvictionState {
 
     /// Atomically cools down the eviction state all the way to [`Cold`](FrameTemperature::Cold),
     /// returning the owning [`PageRef`] if it wasn't already [`Cold`](FrameTemperature::Cold).
-    pub fn evict(&self) -> Option<PageRef> {
+    pub(super) fn evict(&self) -> Option<PageRef> {
         let mut guard = self
             .inner
             .lock()
