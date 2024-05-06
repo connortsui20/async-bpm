@@ -1,7 +1,16 @@
 //! This module contains the definition and implementation of both [`DiskManager`] and
 //! [`DiskManagerHandle`].
 //!
-//! TODO
+//! The [`DiskManager`] type is intended to be an abstraction around all of the permanent /
+//! non-volatile storage that the system has access to.
+//!
+//! This buffer pool manager is built on the assumption that any disk requests made can be carried
+//! out completely in parallel, both in software and in the hardware itself. For example, this
+//! buffer pool manager will operate at its best when given access to several NVMe SSDs, all
+//! attached via PCIe lanes.
+//!
+//! TODO actually use multiple disks with a software implementation of RAID 0.
+//! Emulate using multiple files on a single disk.
 
 use super::frame::Frame;
 use crate::{
@@ -22,6 +31,9 @@ use thread_local::ThreadLocal;
 
 /// The global disk manager instance.
 static DISK_MANAGER: OnceLock<DiskManager> = OnceLock::new();
+
+/// The base name of the files that the disk manager will manage.
+const DISK_FILE_BASE: &str = "bpm.dm.db";
 
 /// Manages reads into and writes from `Frame`s between memory and disk.
 #[derive(Debug)]
@@ -44,15 +56,19 @@ pub struct DiskManager {
 
 impl DiskManager {
     /// Creates a new shared [`DiskManager`] instance.
+    ///
+    /// # Panics
+    ///
+    /// Panics on I/O errors, or if this function is called a second time after a successful return.
     pub fn initialize(capacity: usize, io_slices: Box<[IoSliceMut<'static>]>) {
-        let file_name = "db.test"; // TODO make better
+        let file_name = format!("{DISK_FILE_BASE}0");
 
         let file = OpenOptions::new()
             .create(true)
             .read(true)
             .write(true)
             .custom_flags(O_DIRECT)
-            .open(file_name)
+            .open(&file_name)
             .unwrap_or_else(|e| panic!("Failed to open file {file_name}, with error: {e}"));
 
         let file_size = capacity * PAGE_SIZE;

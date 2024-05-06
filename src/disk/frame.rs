@@ -79,8 +79,8 @@ impl Frame {
         self.eviction_state().set_owner(page)
     }
 
-    /// Changes the `Frame`'s state to [`Cold`](super::eviction::FrameTemperature::Cold) and returns
-    /// the previous owner of the current `Frame`, if it had a [`PageRef`] owner in the first place.
+    /// Changes the `Frame`'s state to `Cold` and returns the previous owner of the current `Frame`,
+    /// if it had a [`PageRef`] owner in the first place.
     pub fn evict_page_owner(&self) -> Option<PageRef> {
         self.eviction_state().evict()
     }
