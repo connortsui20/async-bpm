@@ -141,7 +141,7 @@ impl DiskManagerHandle {
     /// Reads a page's data into a `Frame` from disk.
     ///
     /// This function takes as input a [`PageId`] that represents a unique logical page and a
-    /// [`Frame`] to read the page's data into.
+    /// `Frame` to read the page's data into.
     ///
     /// Since `io_uring` gives "ownership" of the frame that we specify to the kernel (in order for
     /// the kernel to write the data into it), this function takes full ownership of the frame and
@@ -149,7 +149,7 @@ impl DiskManagerHandle {
     ///
     /// # Errors
     ///
-    /// On any sort of error, we still need to return the [`Frame`] back to the caller, so both the
+    /// On any sort of error, we still need to return the `Frame` back to the caller, so both the
     /// `Ok` and `Err` cases return the frame back.
     pub async fn read_into(&self, pid: PageId, mut frame: Frame) -> Result<Frame, Frame> {
         let fd = Fd(DiskManager::get().file.as_raw_fd());
@@ -176,7 +176,7 @@ impl DiskManagerHandle {
     /// Writes a page's data on a `Frame` to disk.
     ///
     /// This function takes as input a [`PageId`] that represents a unique logical page and a
-    /// [`Frame`] that holds the page's new data to store on disk.
+    /// `Frame` that holds the page's new data to store on disk.
     ///
     /// Since `io_uring` gives "ownership" of the frame that we specify to the kernel (in order for
     /// the kernel to write the data into it), this function takes full ownership of the frame and
@@ -184,7 +184,7 @@ impl DiskManagerHandle {
     ///
     /// # Errors
     ///
-    /// On any sort of error, we still need to return the [`Frame`] back to the caller, so both the
+    /// On any sort of error, we still need to return the `Frame` back to the caller, so both the
     /// `Ok` and `Err` cases return the frame back.
     pub async fn write_from(&self, pid: PageId, frame: Frame) -> Result<Frame, Frame> {
         let fd = Fd(DiskManager::get().file.as_raw_fd());
