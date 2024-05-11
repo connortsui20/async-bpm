@@ -52,8 +52,8 @@ impl PageId {
         self.inner
     }
 
-    pub fn fd(&self) -> u32 {
-        todo!("Which file descriptor (which physical disk) does this belong to?")
+    pub fn fd(&self, disk_num: u32) -> u32 {
+        (self.inner % disk_num as u64) as u32
     }
 
     pub fn offset(&self) -> u64 {
