@@ -11,15 +11,14 @@ use tokio::sync::RwLockWriteGuard;
 
 /// A thread-local handle to a logical page of data.
 #[derive(Derivative)]
-#[derivative(Debug, Clone, PartialEq, Eq, Hash)]
+#[derivative(Debug, Clone)]
 pub struct PageHandle {
     /// A shared pointer to the [`Page`](super::Page) object.
     pub(crate) page: PageRef,
 
     /// A thread-local handle to the disk manager.
     ///
-    /// Note that it is possible to remove this field and create disk manager handles on demand.
-    /// TODO should this be on demand or not?
+    /// By including this field, [`PageHandle`] is `!Send` and `!Sync`.
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) dm: DiskManagerHandle,
 }
