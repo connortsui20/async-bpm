@@ -34,6 +34,10 @@ pub struct IoUringAsync {
 impl IoUringAsync {
     /// Creates a new thread-local `IoUringAsync` instance that can support holding `entries`
     /// submission queue entries.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an I/O error if creation of the `io_uring` instance fails.
     pub fn new(entries: u16) -> io::Result<Self> {
         Ok(Self {
             uring: Rc::new(RefCell::new(io_uring::IoUring::new(entries as u32)?)),
@@ -42,6 +46,10 @@ impl IoUringAsync {
     }
 
     /// Calls [`IoUringAsync::new`] with `IO_URING_DEFAULT_ENTRIES` entries.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an I/O error if creation of the `io_uring` instance fails.
     pub fn try_default() -> io::Result<Self> {
         Self::new(IO_URING_DEFAULT_ENTRIES)
     }
@@ -52,6 +60,11 @@ impl IoUringAsync {
     /// otherwise no `Op` futures will ever make progress, or the runtime must be set up to
     /// continuously poll the [`IoUringAsync`] instance, for example in
     /// [`tokio::runtime::Builder::on_thread_park`].
+    ///
+    /// # Panics
+    ///
+    /// This function panics if is not called in the context of the tokio runtime, or if the `rt`
+    /// feature flag is not enabled.
     pub async fn listener(self: &Rc<Self>) -> ! {
         let async_fd = AsyncFd::new(self.clone()).unwrap();
 
@@ -82,11 +95,11 @@ impl IoUringAsync {
         let mut operations_guard = self.operations.borrow_mut();
 
         let index = operations_guard.insert(id, Lifecycle::Unsubmitted);
-        assert!(
+        debug_assert!(
             index.is_none(),
             "Tried to start an IO event with id {id} that was already in progress, \
             with current state {:?}",
-            index.unwrap()
+            index
         );
 
         let mut uring_guard = self.uring.borrow_mut();
@@ -114,6 +127,10 @@ impl IoUringAsync {
     ///
     /// Ideally, this function should be called on the [`IoUringAsync`] instance every time a worker
     /// thread parks. For example, call `submit` from [`tokio::runtime::Builder::on_thread_park`].
+    ///
+    /// # Errors
+    ///
+    /// This function fails if the underlying `io_uring` instance call to `io_uring_submit` fails.
     pub fn submit(&self) -> std::io::Result<usize> {
         self.uring.borrow().submit()
     }
@@ -126,6 +143,7 @@ impl IoUringAsync {
     /// It is then on the caller to `.await` the [`Future`](std::future::Future) returned by
     /// [`IoUringAsync::push`] to observe the result of the operation, as well as remove it from the
     /// `HashMap` of current in-flight operations by [`Future`](std::future::Future).
+    #[allow(clippy::missing_panics_doc)]
     pub fn poll(&self) {
         let mut uring_guard = self.uring.borrow_mut();
         let completion_queue = uring_guard.completion();
@@ -140,7 +158,7 @@ impl IoUringAsync {
             // owning `Op` gets dropped. Since `Op` is only dropped after it has polled/observed a
             // `Lifecycle::Completed`, and we only set them to completed here, we can guarantee that
             // the operation state is still mapped in the table.
-            let lifecycle = guard.get_mut(&id).unwrap();
+            let lifecycle = guard.get_mut(&id).expect("Lifecycle Invariant Broken");
 
             // Set operation status to completed
             match lifecycle {
@@ -163,6 +181,7 @@ impl IoUringAsync {
     }
 
     /// Registers fixed buffers into the `IoUringAsync` instance to be shared with the kernel.
+    #[allow(clippy::missing_panics_doc)]
     pub fn register_buffers(&self, buffers: &[IoSlice<'static>]) {
         let ptr = buffers.as_ptr() as *const iovec;
 
