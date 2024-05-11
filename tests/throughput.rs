@@ -32,7 +32,7 @@ fn bench() {
     BufferPoolManager::initialize(FRAMES, DISK_PAGES);
     let bpm = BufferPoolManager::get();
 
-    let coin = Bernoulli::new(0.2).unwrap();
+    let coin = Bernoulli::new(20.0 / 100.0).unwrap();
 
     println!("Operations: {OPERATIONS}");
 

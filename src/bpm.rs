@@ -202,6 +202,10 @@ impl BufferPoolManager {
     /// Creates a `tokio` thread-local [`Runtime`] that works with
     /// [`IoUringAsync`](crate::io::IoUringAsync) by calling `submit` and `poll` every time a worker
     /// thread gets parked.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if it is unable to build the [`Runtime`].
     pub fn build_thread_runtime(&self) -> Runtime {
         let dmh = self.get_disk_manager();
         let uring = Rc::new(dmh.get_uring());

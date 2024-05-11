@@ -20,3 +20,6 @@ tracing-subscriber = "0.3.18"
 
 [dev-dependencies]
 tokio = { version = "1.37.0", features = ["full"] }
+
+[profile.release]
+debug = true

@@ -90,11 +90,17 @@ impl<'a> WritePageGuard<'a> {
     }
 
     /// Flushes a page's data out to disk.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if it is unable to complete the write operation to a file.
+    ///
+    /// TODO should this change? What is someone supposed to do if a flush fails?
     pub async fn flush(&mut self) {
         assert!(self.guard.is_some());
 
         // Temporarily take ownership of the frame from the guard
-        let frame = self.guard.take().unwrap();
+        let frame = self.guard.take().expect("WritePageGuard had no Frame");
         let page = frame
             .get_page_owner()
             .expect("Tried to flush a frame that had no page owner");

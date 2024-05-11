@@ -1,7 +1,16 @@
 //! This module contains the definition and implementation of both [`DiskManager`] and
 //! [`DiskManagerHandle`].
 //!
-//! TODO
+//! The [`DiskManager`] type is intended to be an abstraction around all of the permanent /
+//! non-volatile storage that the system has access to.
+//!
+//! This buffer pool manager is built on the assumption that any disk requests made can be carried
+//! out completely in parallel, both in software and in the hardware itself. For example, this
+//! buffer pool manager will operate at its best when given access to several NVMe SSDs, all
+//! attached via PCIe lanes.
+//!
+//! TODO actually use multiple disks with a software implementation of RAID 0.
+//! Emulate using multiple files on a single disk.
 
 use super::frame::Frame;
 use crate::{
@@ -44,15 +53,19 @@ pub struct DiskManager {
 
 impl DiskManager {
     /// Creates a new shared [`DiskManager`] instance.
+    ///
+    /// # Panics
+    ///
+    /// Panics on I/O errors, or if this function is called a second time after a successful return.
     pub fn initialize(capacity: usize, io_slices: Box<[IoSliceMut<'static>]>) {
-        let file_name = "db.test"; // TODO make better
+        let file_name = format!("bpm.dm.{}.db", 0);
 
         let file = OpenOptions::new()
             .create(true)
             .read(true)
             .write(true)
             .custom_flags(O_DIRECT)
-            .open(file_name)
+            .open(&file_name)
             .unwrap_or_else(|e| panic!("Failed to open file {file_name}, with error: {e}"));
 
         let file_size = capacity * PAGE_SIZE;
@@ -123,6 +136,18 @@ pub struct DiskManagerHandle {
 
 impl DiskManagerHandle {
     /// Reads a page's data into a `Frame` from disk.
+    ///
+    /// This function takes as input a [`PageId`] that represents a unique logical page and a
+    /// `Frame` to read the page's data into.
+    ///
+    /// Since `io_uring` gives "ownership" of the frame that we specify to the kernel (in order for
+    /// the kernel to write the data into it), this function takes full ownership of the frame and
+    /// then gives it back to the caller on return.
+    ///
+    /// # Errors
+    ///
+    /// On any sort of error, we still need to return the `Frame` back to the caller, so both the
+    /// `Ok` and `Err` cases return the frame back.
     pub async fn read_into(&self, pid: PageId, mut frame: Frame) -> Result<Frame, Frame> {
         let fd = Fd(DiskManager::get().file.as_raw_fd());
 
@@ -146,6 +171,18 @@ impl DiskManagerHandle {
     }
 
     /// Writes a page's data on a `Frame` to disk.
+    ///
+    /// This function takes as input a [`PageId`] that represents a unique logical page and a
+    /// `Frame` that holds the page's new data to store on disk.
+    ///
+    /// Since `io_uring` gives "ownership" of the frame that we specify to the kernel (in order for
+    /// the kernel to write the data into it), this function takes full ownership of the frame and
+    /// then gives it back to the caller on return.
+    ///
+    /// # Errors
+    ///
+    /// On any sort of error, we still need to return the `Frame` back to the caller, so both the
+    /// `Ok` and `Err` cases return the frame back.
     pub async fn write_from(&self, pid: PageId, frame: Frame) -> Result<Frame, Frame> {
         let fd = Fd(DiskManager::get().file.as_raw_fd());
 
