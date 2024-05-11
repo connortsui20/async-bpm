@@ -32,9 +32,6 @@ use thread_local::ThreadLocal;
 /// The global disk manager instance.
 static DISK_MANAGER: OnceLock<DiskManager> = OnceLock::new();
 
-/// The base name of the files that the disk manager will manage.
-const DISK_FILE_BASE: &str = "bpm.dm.db";
-
 /// Manages reads into and writes from `Frame`s between memory and disk.
 #[derive(Debug)]
 pub struct DiskManager {
@@ -61,7 +58,7 @@ impl DiskManager {
     ///
     /// Panics on I/O errors, or if this function is called a second time after a successful return.
     pub fn initialize(capacity: usize, io_slices: Box<[IoSliceMut<'static>]>) {
-        let file_name = format!("{DISK_FILE_BASE}0");
+        let file_name = format!("bpm.dm.{}.db", 0);
 
         let file = OpenOptions::new()
             .create(true)
