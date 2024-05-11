@@ -13,8 +13,14 @@ Cargo.lock
 # MSVC Windows builds of rustc generate these, which store debugging information
 *.pdb
 
+Dockerfile
+
+# Testing output
 *.log
 *.test
 *.db
 
-Dockerfile
+# Flamegraph output
+*.svg
+*.data
+*.old
