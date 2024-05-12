@@ -71,7 +71,7 @@ impl DiskManager {
                     .open(&file_name)
                     .unwrap_or_else(|e| panic!("Failed to open file {file_name}, with error: {e}"));
 
-                let file_size = capacity * PAGE_SIZE;
+                let file_size = (capacity / drives) * PAGE_SIZE;
                 file.set_len(file_size as u64)
                     .expect("Was unable to change the length of {file_name} to {file_size}");
 
