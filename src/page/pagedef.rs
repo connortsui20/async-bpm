@@ -44,19 +44,26 @@ impl Display for PageId {
 /// Implementation of this type subject to change...
 #[allow(missing_docs)]
 impl PageId {
+    /// Creates a new `PageId` from a `u64`.
     pub fn new(id: u64) -> Self {
         Self { inner: id }
     }
 
+    /// Returns the `PageId` as a `u64`.
+    ///
+    /// A `PageId` must always be convertible into a unique 64-bit integer.
     pub fn as_u64(self) -> u64 {
         self.inner
     }
 
-    pub fn fd(&self, disk_num: u32) -> u32 {
+    /// Returns the file descriptor of the file that holds this page on disk.
+    pub(crate) fn fd(&self, disk_num: u32) -> u32 {
         (self.inner % disk_num as u64) as u32
     }
 
-    pub fn offset(&self) -> u64 {
+    /// Returns the offset of this page's data on disk into the file returned by
+    /// [`PageId::fd()`].
+    pub(crate) fn offset(&self) -> u64 {
         self.as_u64() * PAGE_SIZE as u64
     }
 }
