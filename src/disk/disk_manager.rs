@@ -48,7 +48,7 @@ pub struct DiskManager {
     io_urings: ThreadLocal<SendWrapper<IoUringAsync>>,
 
     /// The files storing all data. While the [`DiskManager`] has ownership, they won't be closed.
-    files: Vec<File>,
+    pub(crate) files: Vec<File>,
 }
 
 impl DiskManager {
@@ -62,6 +62,7 @@ impl DiskManager {
             .map(|d| {
                 let file_name = format!("bpm.dm.{}.db", d);
 
+                // TODO these files should be on separate drives
                 let file = OpenOptions::new()
                     .create(true)
                     .read(true)
@@ -99,6 +100,15 @@ impl DiskManager {
         DISK_MANAGER
             .get()
             .expect("Tried to get a reference to the disk manager before it was initialized")
+    }
+
+    /// Retrieves the number of drives that the pages are stored on.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if it is called before a call to [`DiskManager::initialize`].
+    pub fn get_num_drives() -> usize {
+        Self::get().files.len()
     }
 
     /// Creates a thread-local [`DiskManagerHandle`] that has a reference back to this disk manager.
@@ -156,7 +166,7 @@ impl DiskManagerHandle {
     /// `Ok` and `Err` cases return the frame back.
     pub async fn read_into(&self, pid: PageId, mut frame: Frame) -> Result<Frame, Frame> {
         let dm: &DiskManager = DiskManager::get();
-        let file_index = pid.file_index(dm.files.len());
+        let file_index = pid.file_index();
         let fd = Fd(dm.files[file_index].as_raw_fd());
 
         // Since we own the frame (and nobody else is reading from it), this is fine to mutate
@@ -193,7 +203,7 @@ impl DiskManagerHandle {
     /// `Ok` and `Err` cases return the frame back.
     pub async fn write_from(&self, pid: PageId, frame: Frame) -> Result<Frame, Frame> {
         let dm: &DiskManager = DiskManager::get();
-        let file_index = pid.file_index(dm.files.len());
+        let file_index = pid.file_index();
         let fd = Fd(dm.files[file_index].as_raw_fd());
 
         let buf_ptr = frame.as_ptr();
