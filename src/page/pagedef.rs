@@ -56,9 +56,9 @@ impl PageId {
         self.inner
     }
 
-    /// Returns the file descriptor of the file that holds this page on disk.
-    pub(crate) fn fd(&self, disk_num: u32) -> u32 {
-        (self.inner % disk_num as u64) as u32
+    /// Returns the index of the file that holds this page on disk.
+    pub(crate) fn file_index(&self, disk_num: usize) -> usize {
+        (self.inner % disk_num as u64) as usize
     }
 
     /// Returns the offset of this page's data on disk into the file returned by

@@ -47,8 +47,8 @@ pub struct DiskManager {
     /// Thread-local `IoUringAsync` instances.
     io_urings: ThreadLocal<SendWrapper<IoUringAsync>>,
 
-    /// The file storing all data. While the [`DiskManager`] has ownership, it won't be closed.
-    file: File,
+    /// The files storing all data. While the [`DiskManager`] has ownership, they won't be closed.
+    files: Vec<File>,
 }
 
 impl DiskManager {
@@ -57,25 +57,31 @@ impl DiskManager {
     /// # Panics
     ///
     /// Panics on I/O errors, or if this function is called a second time after a successful return.
-    pub fn initialize(capacity: usize, io_slices: Box<[IoSliceMut<'static>]>) {
-        let file_name = format!("bpm.dm.{}.db", 0);
+    pub fn initialize(drives: usize, capacity: usize, io_slices: Box<[IoSliceMut<'static>]>) {
+        let files = (0..drives)
+            .map(|d| {
+                let file_name = format!("bpm.dm.{}.db", d);
 
-        let file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .custom_flags(O_DIRECT)
-            .open(&file_name)
-            .unwrap_or_else(|e| panic!("Failed to open file {file_name}, with error: {e}"));
+                let file = OpenOptions::new()
+                    .create(true)
+                    .read(true)
+                    .write(true)
+                    .custom_flags(O_DIRECT)
+                    .open(&file_name)
+                    .unwrap_or_else(|e| panic!("Failed to open file {file_name}, with error: {e}"));
 
-        let file_size = capacity * PAGE_SIZE;
-        file.set_len(file_size as u64)
-            .expect("Was unable to change the length of {file_name} to {file_size}");
+                let file_size = capacity * PAGE_SIZE;
+                file.set_len(file_size as u64)
+                    .expect("Was unable to change the length of {file_name} to {file_size}");
+
+                file
+            })
+            .collect();
 
         let dm = Self {
             register_buffers: io_slices,
             io_urings: ThreadLocal::new(),
-            file,
+            files,
         };
 
         // Set the global disk manager instance
@@ -149,7 +155,9 @@ impl DiskManagerHandle {
     /// On any sort of error, we still need to return the `Frame` back to the caller, so both the
     /// `Ok` and `Err` cases return the frame back.
     pub async fn read_into(&self, pid: PageId, mut frame: Frame) -> Result<Frame, Frame> {
-        let fd = Fd(DiskManager::get().file.as_raw_fd());
+        let dm: &DiskManager = DiskManager::get();
+        let file_index = pid.file_index(dm.files.len());
+        let fd = Fd(dm.files[file_index].as_raw_fd());
 
         // Since we own the frame (and nobody else is reading from it), this is fine to mutate
         let buf_ptr = frame.as_mut_ptr();
@@ -184,7 +192,9 @@ impl DiskManagerHandle {
     /// On any sort of error, we still need to return the `Frame` back to the caller, so both the
     /// `Ok` and `Err` cases return the frame back.
     pub async fn write_from(&self, pid: PageId, frame: Frame) -> Result<Frame, Frame> {
-        let fd = Fd(DiskManager::get().file.as_raw_fd());
+        let dm: &DiskManager = DiskManager::get();
+        let file_index = pid.file_index(dm.files.len());
+        let fd = Fd(dm.files[file_index].as_raw_fd());
 
         let buf_ptr = frame.as_ptr();
 
