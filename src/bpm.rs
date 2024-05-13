@@ -124,7 +124,7 @@ impl BufferPoolManager {
         let registerable_buffers = registerable_buffers.into_boxed_slice();
 
         // Initialize the global `DiskManager` instance
-        DiskManager::initialize(capacity, registerable_buffers);
+        DiskManager::initialize(8, capacity, registerable_buffers);
     }
 
     /// Retrieve a static reference to the global buffer pool manager.
