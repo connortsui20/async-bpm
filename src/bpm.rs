@@ -123,7 +123,7 @@ impl BufferPoolManager {
         // This copy will only be used to register into the `io_uring` instance, and never accessed
         let registerable_buffers = registerable_buffers.into_boxed_slice();
 
-        // Initialize the global `DiskManager` instance
+        // Initialize the global `DriveManager` instance
         DriveManager::initialize(8, capacity, registerable_buffers);
     }
 
@@ -194,7 +194,7 @@ impl BufferPoolManager {
         PageHandle::new(page, DriveManager::get().create_handle())
     }
 
-    /// Creates a thread-local [`DiskManagerHandle`] to the inner [`DiskManager`].
+    /// Creates a thread-local [`DriveManagerHandle`] to the inner [`DriveManager`].
     pub fn get_disk_manager(&self) -> DriveManagerHandle {
         DriveManager::get().create_handle()
     }

@@ -1,7 +1,7 @@
-//! This module contains the definition and implementation of both [`DiskManager`] and
-//! [`DiskManagerHandle`].
+//! This module contains the definition and implementation of both [`DriveManager`] and
+//! [`DriveManagerHandle`].
 //!
-//! The [`DiskManager`] type is intended to be an abstraction around all of the permanent /
+//! The [`DriveManager`] type is intended to be an abstraction around all of the permanent /
 //! non-volatile storage that the system has access to.
 //!
 //! This buffer pool manager is built on the assumption that any disk requests made can be carried
@@ -47,12 +47,12 @@ pub struct DriveManager {
     /// Thread-local `IoUringAsync` instances.
     io_urings: ThreadLocal<SendWrapper<IoUringAsync>>,
 
-    /// The files storing all data. While the [`DiskManager`] has ownership, they won't be closed.
+    /// The files storing all data. While the [`DriveManager`] has ownership, they won't be closed.
     pub(crate) files: Vec<File>,
 }
 
 impl DriveManager {
-    /// Creates a new shared [`DiskManager`] instance.
+    /// Creates a new shared [`DriveManager`] instance.
     ///
     /// # Panics
     ///
@@ -95,7 +95,7 @@ impl DriveManager {
     ///
     /// # Panics
     ///
-    /// This function will panic if it is called before a call to [`DiskManager::initialize`].
+    /// This function will panic if it is called before a call to [`DriveManager::initialize`].
     pub fn get() -> &'static Self {
         DRIVE_MANAGER
             .get()
@@ -106,12 +106,12 @@ impl DriveManager {
     ///
     /// # Panics
     ///
-    /// This function will panic if it is called before a call to [`DiskManager::initialize`].
+    /// This function will panic if it is called before a call to [`DriveManager::initialize`].
     pub fn get_num_drives() -> usize {
         Self::get().files.len()
     }
 
-    /// Creates a thread-local [`DiskManagerHandle`] that has a reference back to this disk manager.
+    /// Creates a thread-local [`DriveManagerHandle`] that has a reference back to this disk manager.
     pub fn create_handle(&self) -> DriveManagerHandle {
         let uring = self.get_thread_local_uring();
 
@@ -143,7 +143,7 @@ impl DriveManager {
     }
 }
 
-/// A thread-local handle to a [`DiskManager`] that contains an inner [`IoUringAsync`] instance.
+/// A thread-local handle to a [`DriveManager`] that contains an inner [`IoUringAsync`] instance.
 #[derive(Debug, Clone)]
 pub struct DriveManagerHandle {
     /// The inner `io_uring` instance wrapped with asynchronous capabilities and methods.

@@ -27,9 +27,9 @@ fn bench() {
     const ITERATIONS: usize = THREAD_OPERATIONS / TASKS; // iterations per task
 
     const FRAMES: usize = GIGABYTE_PAGES;
-    const DISK_PAGES: usize = 32 * GIGABYTE_PAGES;
+    const DRIVE_PAGES: usize = 32 * GIGABYTE_PAGES;
 
-    BufferPoolManager::initialize(FRAMES, DISK_PAGES);
+    BufferPoolManager::initialize(FRAMES, DRIVE_PAGES);
     let bpm = BufferPoolManager::get();
 
     let coin = Bernoulli::new(20.0 / 100.0).unwrap();
@@ -50,7 +50,7 @@ fn bench() {
                             let mut rng = rand::thread_rng();
 
                             for iteration in 0..ITERATIONS {
-                                let id = rng.gen_range(0..DISK_PAGES) as u64;
+                                let id = rng.gen_range(0..DRIVE_PAGES) as u64;
                                 let pid = PageId::new(id);
                                 let ph = bpm.get_page(&pid).await;
 
