@@ -1,8 +1,8 @@
 //! This module contains the declaration and implementation of the [`BufferPoolManager`] type.
 //!
 //! This buffer pool manager has an asynchronous implementation that is built on top of an
-//! asynchronous disk / permanent storage manager, which is itself built on top of the Linux
-//! `io_uring` interface.
+//! asynchronous persistent / non-volatile storage manager, which is itself built on top of the
+//! Linux `io_uring` interface.
 //!
 //! The goal for this buffer pool manager is to exploit parallelism as much as possible by limiting
 //! the use of any global latches or single points of contention for the entire system. This means
@@ -33,8 +33,8 @@ use tokio::{
 /// The global buffer pool manager instance.
 static BPM: OnceLock<BufferPoolManager> = OnceLock::new();
 
-/// A parallel Buffer Pool Manager that manages bringing logical pages from disk into memory via
-/// shared and fixed buffer frames.
+/// A parallel Buffer Pool Manager that manages bringing logical pages from persistent storage into
+/// memory via shared and fixed buffer frames.
 #[derive(Debug)]
 pub struct BufferPoolManager {
     /// The total number of buffer frames this [`BufferPoolManager`] manages.
@@ -51,8 +51,9 @@ impl BufferPoolManager {
     /// Constructs a new buffer pool manager with the given number of [`PAGE_SIZE`]ed buffer frames.
     ///
     /// The argument `capacity` should be the starting number of logical pages the user of the
-    /// [`BufferPoolManager`] wishes to use, as it will allocate enough space on disk to initially
-    /// accommodate that number. TODO this is subject to change once the disk manager improves.
+    /// [`BufferPoolManager`] wishes to use, as it will allocate enough space persistent storage to
+    /// initially accommodate that number. TODO this is subject to change once the drive manager
+    /// improves.
     ///
     /// This function will create two copies of the buffers allocated, 1 copy for user access
     /// through `Frame`s and `FrameGroup`s, and another copy for kernel access by registering
@@ -62,7 +63,7 @@ impl BufferPoolManager {
     /// # Panics
     ///
     /// This function will panic if `num_frames` is not a multiple of
-    /// [`FRAME_GROUP_SIZE`]((crate::disk::frame::FRAME_GROUP_SIZE)).
+    /// [`FRAME_GROUP_SIZE`]((crate::drive::frame::FRAME_GROUP_SIZE)).
     pub fn initialize(num_frames: usize, capacity: usize) {
         assert!(
             BPM.get().is_none(),
@@ -195,7 +196,7 @@ impl BufferPoolManager {
     }
 
     /// Creates a thread-local [`DriveManagerHandle`] to the inner [`DriveManager`].
-    pub fn get_disk_manager(&self) -> DriveManagerHandle {
+    pub fn get_drive_manager(&self) -> DriveManagerHandle {
         DriveManager::get().create_handle()
     }
 
@@ -207,7 +208,7 @@ impl BufferPoolManager {
     ///
     /// This function will panic if it is unable to build the [`Runtime`].
     pub fn build_thread_runtime(&self) -> Runtime {
-        let dmh = self.get_disk_manager();
+        let dmh = self.get_drive_manager();
         let uring = Rc::new(dmh.get_uring());
         let uring_daemon = SendWrapper::new(uring.clone());
 

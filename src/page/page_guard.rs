@@ -89,7 +89,7 @@ impl<'a> WritePageGuard<'a> {
         Self { pid, guard }
     }
 
-    /// Flushes a page's data out to disk.
+    /// Flushes a page's data out to persistent storage.
     ///
     /// # Panics
     ///
@@ -105,12 +105,17 @@ impl<'a> WritePageGuard<'a> {
             .get_page_owner()
             .expect("Tried to flush a frame that had no page owner");
 
-        // Write the data out to disk
+        // Write the data out to persistent storage
         let frame = DriveManager::get()
             .create_handle()
             .write_from(self.pid, frame)
             .await
-            .unwrap_or_else(|_| panic!("Was unable to write data from page {} to disk", self.pid));
+            .unwrap_or_else(|_| {
+                panic!(
+                    "Was unable to write data from page {} to persistent storage",
+                    self.pid
+                )
+            });
 
         // Give ownership back to the guard
         frame.set_page_owner(page);
@@ -127,12 +132,17 @@ impl<'a> WritePageGuard<'a> {
             .evict_page_owner()
             .expect("Tried to evict a frame that had no page owner");
 
-        // Write the data out to disk
+        // Write the data out to persistent storage
         DriveManager::get()
             .create_handle()
             .write_from(self.pid, frame)
             .await
-            .unwrap_or_else(|_| panic!("Was unable to write data from page {} to disk", self.pid))
+            .unwrap_or_else(|_| {
+                panic!(
+                    "Was unable to write data from page {} to persistent storage",
+                    self.pid
+                )
+            })
     }
 }
 

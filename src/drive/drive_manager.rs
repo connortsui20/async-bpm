@@ -1,16 +1,13 @@
 //! This module contains the definition and implementation of both [`DriveManager`] and
 //! [`DriveManagerHandle`].
 //!
-//! The [`DriveManager`] type is intended to be an abstraction around all of the permanent /
+//! The [`DriveManager`] type is intended to be an abstraction around all of the persistent /
 //! non-volatile storage that the system has access to.
 //!
-//! This buffer pool manager is built on the assumption that any disk requests made can be carried
-//! out completely in parallel, both in software and in the hardware itself. For example, this
-//! buffer pool manager will operate at its best when given access to several NVMe SSDs, all
+//! This buffer pool manager is built on the assumption that any storage requests made can be
+//! carried out completely in parallel, both in software and in the hardware itself. For example,
+//! this buffer pool manager will operate at its best when given access to several NVMe SSDs, all
 //! attached via PCIe lanes.
-//!
-//! TODO actually use multiple disks with a software implementation of RAID 0.
-//! Emulate using multiple files on a single disk.
 
 use super::frame::Frame;
 use crate::{
@@ -29,10 +26,10 @@ use std::{
 };
 use thread_local::ThreadLocal;
 
-/// The global disk manager instance.
+/// The global drive manager instance.
 static DRIVE_MANAGER: OnceLock<DriveManager> = OnceLock::new();
 
-/// Manages reads into and writes from `Frame`s between memory and disk.
+/// Manages reads into and writes from `Frame`s between memory and persistent storage.
 #[derive(Debug)]
 pub struct DriveManager {
     /// A slice of buffers, used solely to register into new [`IoUringAsync`] instances.
@@ -85,13 +82,13 @@ impl DriveManager {
             files,
         };
 
-        // Set the global disk manager instance
+        // Set the global drive manager instance
         DRIVE_MANAGER
             .set(dm)
-            .expect("Tried to set the global disk pool manager more than once")
+            .expect("Tried to set the global drive manager more than once")
     }
 
-    /// Retrieve a static reference to the global disk manager.
+    /// Retrieve a static reference to the global drive manager.
     ///
     /// # Panics
     ///
@@ -99,7 +96,7 @@ impl DriveManager {
     pub fn get() -> &'static Self {
         DRIVE_MANAGER
             .get()
-            .expect("Tried to get a reference to the disk manager before it was initialized")
+            .expect("Tried to get a reference to the drive manager before it was initialized")
     }
 
     /// Retrieves the number of drives that the pages are stored on.
@@ -111,7 +108,7 @@ impl DriveManager {
         Self::get().files.len()
     }
 
-    /// Creates a thread-local [`DriveManagerHandle`] that has a reference back to this disk manager.
+    /// Creates a thread-local [`DriveManagerHandle`] that has a reference back to this drive manager.
     pub fn create_handle(&self) -> DriveManagerHandle {
         let uring = self.get_thread_local_uring();
 
@@ -151,7 +148,7 @@ pub struct DriveManagerHandle {
 }
 
 impl DriveManagerHandle {
-    /// Reads a page's data into a `Frame` from disk.
+    /// Reads a page's data into a `Frame` from persistent storage.
     ///
     /// This function takes as input a [`PageId`] that represents a unique logical page and a
     /// `Frame` to read the page's data into.
@@ -188,10 +185,10 @@ impl DriveManagerHandle {
         }
     }
 
-    /// Writes a page's data on a `Frame` to disk.
+    /// Writes a page's data on a `Frame` to persistent storage.
     ///
     /// This function takes as input a [`PageId`] that represents a unique logical page and a
-    /// `Frame` that holds the page's new data to store on disk.
+    /// `Frame` that holds the page's new data to store on persistent storage.
     ///
     /// Since `io_uring` gives "ownership" of the frame that we specify to the kernel (in order for
     /// the kernel to write the data into it), this function takes full ownership of the frame and

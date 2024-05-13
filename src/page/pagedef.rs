@@ -18,9 +18,11 @@ pub struct Page {
 
     /// An optional pointer to a buffer [`Frame`], protected by a [`RwLock`].
     ///
-    /// Either a page's data is in a [`Frame`] in memory, or it is only stored on disk / permanent
-    /// storage. In either case, it is protected by a read-write lock to ensure that multiple
-    /// threads and tasks can access the optional frame with proper synchronization.
+    /// Either a page's data is in a [`Frame`] in memory, or it is only stored on persistent
+    /// storage.
+    ///
+    /// In either case, it is protected by a read-write lock to ensure that multiple threads and
+    /// tasks can access the optional frame with proper synchronization.
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) inner: RwLock<Option<Frame>>,
 }
@@ -56,12 +58,12 @@ impl PageId {
         self.inner
     }
 
-    /// Returns the index of the file that holds this page on disk.
+    /// Returns the index of the file that holds this page on persistent storage.
     pub(crate) fn file_index(&self) -> usize {
         (self.inner % DriveManager::get_num_drives() as u64) as usize
     }
 
-    /// Returns the offset of this page's data on disk into the file returned by
+    /// Returns the offset of this page's data on persistent storage into the file returned by
     /// [`PageId::fd()`].
     pub(crate) fn offset(&self) -> u64 {
         (self.as_u64() / DriveManager::get_num_drives() as u64) * PAGE_SIZE as u64

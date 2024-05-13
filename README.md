@@ -1,6 +1,6 @@
 # Design
 
-This model is aimed at a thread-per-core model with multiple permanent storage drives.
+This model is aimed at a thread-per-core model with multiple persistent storage drives.
 This implies that tasks (coroutines) given to worker threads cannot be moved between threads
 (or in other words, are `!Send`).
 So it is on a global scheduler to assign tasks to worker threads appropriately.
@@ -45,7 +45,7 @@ These thread-local daemons exist as foreground tasks, just like any other task t
 -   `Page`: A hybrid-latched (read-write locked for now) page header
     -   State is either `Unloaded`, `Loading` (private), or `Loaded`
         -   `Unloaded` implies that the data is not in memory
-        -   `Loading` implies that the data is being loaded from permanent storage, and contains a future (private)
+        -   `Loading` implies that the data is being loaded from persistent storage, and contains a future (private)
         -   `Loaded` implies the data is on one of the pre-registered buffers, and owns a registered buffer
     -   `Page`s also have eviction state
         -   `Hot` implies that this is a frequently-accessed page
@@ -101,7 +101,7 @@ All optimistic reads have to be done through a read closure (cannot construct a 
 
 ### Load algorithm
 
-Let P1 be the page we want to load from permanent storage into memory. The caller must have the write lock on P1.
+Let P1 be the page we want to load from persistent storage into memory. The caller must have the write lock on P1.
 Once this algorithm is complete, the page is guaranteed to be loaded into the owned frame,
 and the page eviction state will be `Hot`.
 
@@ -109,7 +109,7 @@ and the page eviction state will be `Hot`.
 -   Otherwise, this page is `Unloaded`
 -   `await` a free frame from the global channel of frames
 -   Set the frame's parent pointer to P1
--   Read P1's data from permanent storage into the buffer
+-   Read P1's data from persistent storage into the buffer
 -   `await` read completion from the local `io_uring` instance
 -   At the end, set the page eviction state to `Hot`
 
@@ -129,7 +129,7 @@ It will aim to have some certain threshold of free pages in the free list.
         -   Check if Px has been changed to `Hot`, and if so, return early
         -   Write-lock Px
         -   If Px is now either `Hot` or `Unloaded`, unlock and return early
-        -   Write Px's buffer data out to permanent storage via the local `io_uring` instance
+        -   Write Px's buffer data out to persistent storage via the local `io_uring` instance
         -   `await` write completion from the local `io_uring` instance
         -   Set Px to `Unloaded`
         -   Send Px's frame to the global channel of free frames

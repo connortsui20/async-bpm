@@ -16,7 +16,7 @@ pub struct PageHandle {
     /// A shared pointer to the [`Page`](super::Page) object.
     pub(crate) page: PageRef,
 
-    /// A thread-local handle to the disk manager.
+    /// A thread-local handle to the drive manager.
     ///
     /// By including this field, [`PageHandle`] is `!Send` and `!Sync`.
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
@@ -105,7 +105,7 @@ impl PageHandle {
         Some(WritePageGuard::new(self.page.pid, write_guard))
     }
 
-    /// Loads page data from disk into a frame in memory.
+    /// Loads page data from persistent storage into a frame in memory.
     async fn load(&self, guard: &mut RwLockWriteGuard<'_, Option<Frame>>) {
         // If someone else got in front of us and loaded the page for us
         if let Some(frame) = guard.deref().deref() {
@@ -121,14 +121,14 @@ impl PageHandle {
         let frame = frame_group.get_free_frame().await;
         frame.set_page_owner(self.page.clone());
 
-        // Read the data in from disk via our disk manager handle
+        // Read the data in from persistent storage via the drive manager handle
         let frame = self
             .dm
             .read_into(self.page.pid, frame)
             .await
             .unwrap_or_else(|_| {
                 panic!(
-                    "Was unable to read data from page {} from disk",
+                    "Was unable to read data from page {} from persistent storage",
                     self.page.pid
                 )
             });
