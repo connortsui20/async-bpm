@@ -1,16 +1,13 @@
-//! This module contains the definition and implementation of both [`DiskManager`] and
-//! [`DiskManagerHandle`].
+//! This module contains the definition and implementation of both [`StorageManager`] and
+//! [`StorageManagerHandle`].
 //!
-//! The [`DiskManager`] type is intended to be an abstraction around all of the permanent /
+//! The [`StorageManager`] type is intended to be an abstraction around all of the persistent /
 //! non-volatile storage that the system has access to.
 //!
-//! This buffer pool manager is built on the assumption that any disk requests made can be carried
-//! out completely in parallel, both in software and in the hardware itself. For example, this
-//! buffer pool manager will operate at its best when given access to several NVMe SSDs, all
+//! This buffer pool manager is built on the assumption that any storage requests made can be
+//! carried out completely in parallel, both in software and in the hardware itself. For example,
+//! this buffer pool manager will operate at its best when given access to several NVMe SSDs, all
 //! attached via PCIe lanes.
-//!
-//! TODO actually use multiple disks with a software implementation of RAID 0.
-//! Emulate using multiple files on a single disk.
 
 use super::frame::Frame;
 use crate::{
@@ -29,12 +26,12 @@ use std::{
 };
 use thread_local::ThreadLocal;
 
-/// The global disk manager instance.
-static DISK_MANAGER: OnceLock<DiskManager> = OnceLock::new();
+/// The global storage manager instance.
+static STORAGE_MANAGER: OnceLock<StorageManager> = OnceLock::new();
 
-/// Manages reads into and writes from `Frame`s between memory and disk.
+/// Manages reads into and writes from `Frame`s between memory and persistent storage.
 #[derive(Debug)]
-pub struct DiskManager {
+pub struct StorageManager {
     /// A slice of buffers, used solely to register into new [`IoUringAsync`] instances.
     ///
     /// Right now, this only supports a single group of buffers, but in the future it should be able
@@ -47,12 +44,12 @@ pub struct DiskManager {
     /// Thread-local `IoUringAsync` instances.
     io_urings: ThreadLocal<SendWrapper<IoUringAsync>>,
 
-    /// The files storing all data. While the [`DiskManager`] has ownership, they won't be closed.
+    /// The files storing all data. While the [`StorageManager`] has ownership, they won't be closed.
     pub(crate) files: Vec<File>,
 }
 
-impl DiskManager {
-    /// Creates a new shared [`DiskManager`] instance.
+impl StorageManager {
+    /// Creates a new shared [`StorageManager`] instance.
     ///
     /// # Panics
     ///
@@ -85,37 +82,38 @@ impl DiskManager {
             files,
         };
 
-        // Set the global disk manager instance
-        DISK_MANAGER
+        // Set the global storage manager instance
+        STORAGE_MANAGER
             .set(dm)
-            .expect("Tried to set the global disk pool manager more than once")
+            .expect("Tried to set the global storage manager more than once")
     }
 
-    /// Retrieve a static reference to the global disk manager.
+    /// Retrieve a static reference to the global storage manager.
     ///
     /// # Panics
     ///
-    /// This function will panic if it is called before a call to [`DiskManager::initialize`].
+    /// This function will panic if it is called before a call to [`StorageManager::initialize`].
     pub fn get() -> &'static Self {
-        DISK_MANAGER
+        STORAGE_MANAGER
             .get()
-            .expect("Tried to get a reference to the disk manager before it was initialized")
+            .expect("Tried to get a reference to the storage manager before it was initialized")
     }
 
-    /// Retrieves the number of drives that the pages are stored on.
+    /// Retrieves the number of drives that the pages are stored on in persistent storage.
     ///
     /// # Panics
     ///
-    /// This function will panic if it is called before a call to [`DiskManager::initialize`].
+    /// This function will panic if it is called before a call to [`StorageManager::initialize`].
     pub fn get_num_drives() -> usize {
         Self::get().files.len()
     }
 
-    /// Creates a thread-local [`DiskManagerHandle`] that has a reference back to this disk manager.
-    pub fn create_handle(&self) -> DiskManagerHandle {
+    /// Creates a thread-local [`StorageManagerHandle`] that has a reference back to this storage
+    /// manager.
+    pub fn create_handle(&self) -> StorageManagerHandle {
         let uring = self.get_thread_local_uring();
 
-        DiskManagerHandle { uring }
+        StorageManagerHandle { uring }
     }
 
     /// A helper function that either retrieves the already-created thread-local [`IoUringAsync`]
@@ -143,15 +141,15 @@ impl DiskManager {
     }
 }
 
-/// A thread-local handle to a [`DiskManager`] that contains an inner [`IoUringAsync`] instance.
+/// A thread-local handle to a [`StorageManager`] that contains an inner [`IoUringAsync`] instance.
 #[derive(Debug, Clone)]
-pub struct DiskManagerHandle {
+pub struct StorageManagerHandle {
     /// The inner `io_uring` instance wrapped with asynchronous capabilities and methods.
     uring: IoUringAsync,
 }
 
-impl DiskManagerHandle {
-    /// Reads a page's data into a `Frame` from disk.
+impl StorageManagerHandle {
+    /// Reads a page's data into a `Frame` from persistent storage.
     ///
     /// This function takes as input a [`PageId`] that represents a unique logical page and a
     /// `Frame` to read the page's data into.
@@ -165,7 +163,7 @@ impl DiskManagerHandle {
     /// On any sort of error, we still need to return the `Frame` back to the caller, so both the
     /// `Ok` and `Err` cases return the frame back.
     pub async fn read_into(&self, pid: PageId, mut frame: Frame) -> Result<Frame, Frame> {
-        let dm: &DiskManager = DiskManager::get();
+        let dm: &StorageManager = StorageManager::get();
         let file_index = pid.file_index();
         let fd = Fd(dm.files[file_index].as_raw_fd());
 
@@ -188,10 +186,10 @@ impl DiskManagerHandle {
         }
     }
 
-    /// Writes a page's data on a `Frame` to disk.
+    /// Writes a page's data on a `Frame` to persistent storage.
     ///
     /// This function takes as input a [`PageId`] that represents a unique logical page and a
-    /// `Frame` that holds the page's new data to store on disk.
+    /// `Frame` that holds the page's new data to store on persistent storage.
     ///
     /// Since `io_uring` gives "ownership" of the frame that we specify to the kernel (in order for
     /// the kernel to write the data into it), this function takes full ownership of the frame and
@@ -202,7 +200,7 @@ impl DiskManagerHandle {
     /// On any sort of error, we still need to return the `Frame` back to the caller, so both the
     /// `Ok` and `Err` cases return the frame back.
     pub async fn write_from(&self, pid: PageId, frame: Frame) -> Result<Frame, Frame> {
-        let dm: &DiskManager = DiskManager::get();
+        let dm: &StorageManager = StorageManager::get();
         let file_index = pid.file_index();
         let fd = Fd(dm.files[file_index].as_raw_fd());
 

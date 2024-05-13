@@ -2,9 +2,9 @@
 
 use super::PageRef;
 use crate::bpm::BufferPoolManager;
-use crate::disk::disk_manager::DiskManagerHandle;
-use crate::disk::frame::Frame;
 use crate::page::page_guard::{ReadPageGuard, WritePageGuard};
+use crate::storage::frame::Frame;
+use crate::storage::storage_manager::StorageManagerHandle;
 use derivative::Derivative;
 use std::ops::Deref;
 use tokio::sync::RwLockWriteGuard;
@@ -16,16 +16,16 @@ pub struct PageHandle {
     /// A shared pointer to the [`Page`](super::Page) object.
     pub(crate) page: PageRef,
 
-    /// A thread-local handle to the disk manager.
+    /// A thread-local handle to the storage manager.
     ///
     /// By including this field, [`PageHandle`] is `!Send` and `!Sync`.
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    pub(crate) dm: DiskManagerHandle,
+    pub(crate) dm: StorageManagerHandle,
 }
 
 impl PageHandle {
     /// Creates a new page handle.
-    pub(crate) fn new(page: PageRef, dm: DiskManagerHandle) -> Self {
+    pub(crate) fn new(page: PageRef, dm: StorageManagerHandle) -> Self {
         Self { page, dm }
     }
 
@@ -105,7 +105,7 @@ impl PageHandle {
         Some(WritePageGuard::new(self.page.pid, write_guard))
     }
 
-    /// Loads page data from disk into a frame in memory.
+    /// Loads page data from persistent storage into a frame in memory.
     async fn load(&self, guard: &mut RwLockWriteGuard<'_, Option<Frame>>) {
         // If someone else got in front of us and loaded the page for us
         if let Some(frame) = guard.deref().deref() {
@@ -121,14 +121,14 @@ impl PageHandle {
         let frame = frame_group.get_free_frame().await;
         frame.set_page_owner(self.page.clone());
 
-        // Read the data in from disk via our disk manager handle
+        // Read the data in from persistent storage via the storage manager handle
         let frame = self
             .dm
             .read_into(self.page.pid, frame)
             .await
             .unwrap_or_else(|_| {
                 panic!(
-                    "Was unable to read data from page {} from disk",
+                    "Was unable to read data from page {} from persistent storage",
                     self.page.pid
                 )
             });

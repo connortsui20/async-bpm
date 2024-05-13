@@ -82,7 +82,7 @@ fn test_simple() {
     const ITERATIONS: usize = 1024; // iterations per task
 
     const FRAMES: usize = 64;
-    const DISK_PAGES: usize = 256;
+    const STORAGE_PAGES: usize = 256;
 
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -100,7 +100,7 @@ fn test_simple() {
         .finish();
     tracing::subscriber::set_global_default(stdout_subscriber).unwrap();
 
-    BufferPoolManager::initialize(FRAMES, DISK_PAGES);
+    BufferPoolManager::initialize(FRAMES, STORAGE_PAGES);
     let bpm = BufferPoolManager::get();
 
     let rt = bpm.build_thread_runtime();
@@ -112,7 +112,7 @@ fn test_simple() {
             let mut rng = rand::thread_rng();
 
             for iteration in 0..ITERATIONS {
-                let id = rng.gen_range(0..DISK_PAGES) as u64;
+                let id = rng.gen_range(0..STORAGE_PAGES) as u64;
                 let pid = PageId::new(id);
                 let ph = bpm.get_page(&pid).await;
 
