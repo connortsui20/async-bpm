@@ -10,8 +10,8 @@
 //! pool manager would work.
 
 use crate::{
-    drive::{
-        drive_manager::{DriveManager, DriveManagerHandle},
+    storage::{
+        storage_manager::{DriveManager, DriveManagerHandle},
         frame::{FrameGroup, FrameGroupRef, FRAME_GROUP_SIZE},
     },
     page::{Page, PageHandle, PageId, PageRef, PAGE_SIZE},
