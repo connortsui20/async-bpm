@@ -1,7 +1,7 @@
 //! Wrappers around `tokio`'s `RwLockReadGuard` and `RwLockWriteGuard`, dedicated for pages of data.
 
 use super::PageId;
-use crate::drive::{drive_manager::DiskManager, frame::Frame};
+use crate::drive::{drive_manager::DriveManager, frame::Frame};
 use std::ops::{Deref, DerefMut};
 use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
 
@@ -106,7 +106,7 @@ impl<'a> WritePageGuard<'a> {
             .expect("Tried to flush a frame that had no page owner");
 
         // Write the data out to disk
-        let frame = DiskManager::get()
+        let frame = DriveManager::get()
             .create_handle()
             .write_from(self.pid, frame)
             .await
@@ -128,7 +128,7 @@ impl<'a> WritePageGuard<'a> {
             .expect("Tried to evict a frame that had no page owner");
 
         // Write the data out to disk
-        DiskManager::get()
+        DriveManager::get()
             .create_handle()
             .write_from(self.pid, frame)
             .await

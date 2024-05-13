@@ -30,11 +30,11 @@ use std::{
 use thread_local::ThreadLocal;
 
 /// The global disk manager instance.
-static DISK_MANAGER: OnceLock<DiskManager> = OnceLock::new();
+static DRIVE_MANAGER: OnceLock<DriveManager> = OnceLock::new();
 
 /// Manages reads into and writes from `Frame`s between memory and disk.
 #[derive(Debug)]
-pub struct DiskManager {
+pub struct DriveManager {
     /// A slice of buffers, used solely to register into new [`IoUringAsync`] instances.
     ///
     /// Right now, this only supports a single group of buffers, but in the future it should be able
@@ -51,7 +51,7 @@ pub struct DiskManager {
     pub(crate) files: Vec<File>,
 }
 
-impl DiskManager {
+impl DriveManager {
     /// Creates a new shared [`DiskManager`] instance.
     ///
     /// # Panics
@@ -86,7 +86,7 @@ impl DiskManager {
         };
 
         // Set the global disk manager instance
-        DISK_MANAGER
+        DRIVE_MANAGER
             .set(dm)
             .expect("Tried to set the global disk pool manager more than once")
     }
@@ -97,7 +97,7 @@ impl DiskManager {
     ///
     /// This function will panic if it is called before a call to [`DiskManager::initialize`].
     pub fn get() -> &'static Self {
-        DISK_MANAGER
+        DRIVE_MANAGER
             .get()
             .expect("Tried to get a reference to the disk manager before it was initialized")
     }
@@ -112,10 +112,10 @@ impl DiskManager {
     }
 
     /// Creates a thread-local [`DiskManagerHandle`] that has a reference back to this disk manager.
-    pub fn create_handle(&self) -> DiskManagerHandle {
+    pub fn create_handle(&self) -> DriveManagerHandle {
         let uring = self.get_thread_local_uring();
 
-        DiskManagerHandle { uring }
+        DriveManagerHandle { uring }
     }
 
     /// A helper function that either retrieves the already-created thread-local [`IoUringAsync`]
@@ -145,12 +145,12 @@ impl DiskManager {
 
 /// A thread-local handle to a [`DiskManager`] that contains an inner [`IoUringAsync`] instance.
 #[derive(Debug, Clone)]
-pub struct DiskManagerHandle {
+pub struct DriveManagerHandle {
     /// The inner `io_uring` instance wrapped with asynchronous capabilities and methods.
     uring: IoUringAsync,
 }
 
-impl DiskManagerHandle {
+impl DriveManagerHandle {
     /// Reads a page's data into a `Frame` from disk.
     ///
     /// This function takes as input a [`PageId`] that represents a unique logical page and a
@@ -165,7 +165,7 @@ impl DiskManagerHandle {
     /// On any sort of error, we still need to return the `Frame` back to the caller, so both the
     /// `Ok` and `Err` cases return the frame back.
     pub async fn read_into(&self, pid: PageId, mut frame: Frame) -> Result<Frame, Frame> {
-        let dm: &DiskManager = DiskManager::get();
+        let dm: &DriveManager = DriveManager::get();
         let file_index = pid.file_index();
         let fd = Fd(dm.files[file_index].as_raw_fd());
 
@@ -202,7 +202,7 @@ impl DiskManagerHandle {
     /// On any sort of error, we still need to return the `Frame` back to the caller, so both the
     /// `Ok` and `Err` cases return the frame back.
     pub async fn write_from(&self, pid: PageId, frame: Frame) -> Result<Frame, Frame> {
-        let dm: &DiskManager = DiskManager::get();
+        let dm: &DriveManager = DriveManager::get();
         let file_index = pid.file_index();
         let fd = Fd(dm.files[file_index].as_raw_fd());
 

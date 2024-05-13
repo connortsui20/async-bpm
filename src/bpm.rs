@@ -11,7 +11,7 @@
 
 use crate::{
     drive::{
-        drive_manager::{DiskManager, DiskManagerHandle},
+        drive_manager::{DriveManager, DriveManagerHandle},
         frame::{FrameGroup, FrameGroupRef, FRAME_GROUP_SIZE},
     },
     page::{Page, PageHandle, PageId, PageRef, PAGE_SIZE},
@@ -124,7 +124,7 @@ impl BufferPoolManager {
         let registerable_buffers = registerable_buffers.into_boxed_slice();
 
         // Initialize the global `DiskManager` instance
-        DiskManager::initialize(8, capacity, registerable_buffers);
+        DriveManager::initialize(8, capacity, registerable_buffers);
     }
 
     /// Retrieve a static reference to the global buffer pool manager.
@@ -160,7 +160,7 @@ impl BufferPoolManager {
         // First check if it exists already
         let mut pages_guard = self.pages.write().await;
         if let Some(page) = pages_guard.get(pid) {
-            return PageHandle::new(page.clone(), DiskManager::get().create_handle());
+            return PageHandle::new(page.clone(), DriveManager::get().create_handle());
         }
 
         // Create the new page and update the global map of pages
@@ -172,7 +172,7 @@ impl BufferPoolManager {
         pages_guard.insert(*pid, page.clone());
 
         // Create the page handle and return
-        PageHandle::new(page, DiskManager::get().create_handle())
+        PageHandle::new(page, DriveManager::get().create_handle())
     }
 
     /// Gets a thread-local page handle of the buffer pool manager, returning a [`PageHandle`] to
@@ -191,12 +191,12 @@ impl BufferPoolManager {
             }
         };
 
-        PageHandle::new(page, DiskManager::get().create_handle())
+        PageHandle::new(page, DriveManager::get().create_handle())
     }
 
     /// Creates a thread-local [`DiskManagerHandle`] to the inner [`DiskManager`].
-    pub fn get_disk_manager(&self) -> DiskManagerHandle {
-        DiskManager::get().create_handle()
+    pub fn get_disk_manager(&self) -> DriveManagerHandle {
+        DriveManager::get().create_handle()
     }
 
     /// Creates a `tokio` thread-local [`Runtime`] that works with

@@ -2,7 +2,7 @@
 
 use super::PageRef;
 use crate::bpm::BufferPoolManager;
-use crate::drive::drive_manager::DiskManagerHandle;
+use crate::drive::drive_manager::DriveManagerHandle;
 use crate::drive::frame::Frame;
 use crate::page::page_guard::{ReadPageGuard, WritePageGuard};
 use derivative::Derivative;
@@ -20,12 +20,12 @@ pub struct PageHandle {
     ///
     /// By including this field, [`PageHandle`] is `!Send` and `!Sync`.
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    pub(crate) dm: DiskManagerHandle,
+    pub(crate) dm: DriveManagerHandle,
 }
 
 impl PageHandle {
     /// Creates a new page handle.
-    pub(crate) fn new(page: PageRef, dm: DiskManagerHandle) -> Self {
+    pub(crate) fn new(page: PageRef, dm: DriveManagerHandle) -> Self {
         Self { page, dm }
     }
 
