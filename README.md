@@ -1,3 +1,7 @@
+# Asynchronous Buffer Pool Manager
+
+An asynchronous buffer pool manager, built on top of `tokio` and `io_uring`.
+
 # Design
 
 This model is aimed at a thread-per-core model with multiple persistent storage drives.

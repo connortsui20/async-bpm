@@ -1,5 +1,4 @@
-//! An asynchronous buffer pool manager, built on top of `tokio` and `io_uring`.
-
+#![doc = include_str!("../README.md")]
 #![cfg(target_family = "unix")]
 #![warn(missing_docs)]
 #![warn(clippy::missing_docs_in_private_items)]

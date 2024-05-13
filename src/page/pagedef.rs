@@ -63,8 +63,8 @@ impl PageId {
         (self.inner % StorageManager::get_num_drives() as u64) as usize
     }
 
-    /// Returns the offset of this page's data on persistent storage into the file returned by
-    /// [`PageId::fd()`].
+    /// Returns the offset of this page's data on persistent storage into the file indexed by
+    /// [`PageId::file_index()`].
     pub(crate) fn offset(&self) -> u64 {
         (self.as_u64() / StorageManager::get_num_drives() as u64) * PAGE_SIZE as u64
     }
