@@ -1,6 +1,6 @@
 //! Definitions and types related to logical pages of data.
 
-use crate::disk::{disk_manager::DiskManager, frame::Frame};
+use crate::drive::{drive_manager::DiskManager, frame::Frame};
 use derivative::Derivative;
 use std::{fmt::Display, sync::Arc};
 use tokio::sync::RwLock;

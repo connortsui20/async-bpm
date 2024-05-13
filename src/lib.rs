@@ -8,6 +8,6 @@
 #![warn(clippy::missing_safety_doc)]
 
 pub mod bpm;
-pub mod disk;
+pub mod drive;
 pub mod io;
 pub mod page;

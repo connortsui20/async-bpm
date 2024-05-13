@@ -2,8 +2,8 @@
 
 use super::PageRef;
 use crate::bpm::BufferPoolManager;
-use crate::disk::disk_manager::DiskManagerHandle;
-use crate::disk::frame::Frame;
+use crate::drive::drive_manager::DiskManagerHandle;
+use crate::drive::frame::Frame;
 use crate::page::page_guard::{ReadPageGuard, WritePageGuard};
 use derivative::Derivative;
 use std::ops::Deref;
