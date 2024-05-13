@@ -10,11 +10,11 @@
 //! pool manager would work.
 
 use crate::{
-    storage::{
-        storage_manager::{DriveManager, DriveManagerHandle},
-        frame::{FrameGroup, FrameGroupRef, FRAME_GROUP_SIZE},
-    },
     page::{Page, PageHandle, PageId, PageRef, PAGE_SIZE},
+    storage::{
+        frame::{FrameGroup, FrameGroupRef, FRAME_GROUP_SIZE},
+        storage_manager::{StorageManager, StorageManagerHandle},
+    },
 };
 use core::slice;
 use rand::Rng;
@@ -52,18 +52,18 @@ impl BufferPoolManager {
     ///
     /// The argument `capacity` should be the starting number of logical pages the user of the
     /// [`BufferPoolManager`] wishes to use, as it will allocate enough space persistent storage to
-    /// initially accommodate that number. TODO this is subject to change once the drive manager
+    /// initially accommodate that number. TODO this is subject to change once the storage manager
     /// improves.
     ///
     /// This function will create two copies of the buffers allocated, 1 copy for user access
-    /// through `Frame`s and `FrameGroup`s, and another copy for kernel access by registering
-    /// the buffers into the `io_uring` instance via
+    /// through `Frame`s and `FrameGroup`s, and another copy for kernel access by registering the
+    /// buffers into the `io_uring` instance via
     /// [`register_buffers`](io_uring::Submitter::register_buffers).
     ///
     /// # Panics
     ///
     /// This function will panic if `num_frames` is not a multiple of
-    /// [`FRAME_GROUP_SIZE`]((crate::drive::frame::FRAME_GROUP_SIZE)).
+    /// [`FRAME_GROUP_SIZE`]((crate::storage::frame::FRAME_GROUP_SIZE)).
     pub fn initialize(num_frames: usize, capacity: usize) {
         assert!(
             BPM.get().is_none(),
@@ -124,8 +124,8 @@ impl BufferPoolManager {
         // This copy will only be used to register into the `io_uring` instance, and never accessed
         let registerable_buffers = registerable_buffers.into_boxed_slice();
 
-        // Initialize the global `DriveManager` instance
-        DriveManager::initialize(8, capacity, registerable_buffers);
+        // Initialize the global `StorageManager` instance
+        StorageManager::initialize(8, capacity, registerable_buffers);
     }
 
     /// Retrieve a static reference to the global buffer pool manager.
@@ -161,7 +161,7 @@ impl BufferPoolManager {
         // First check if it exists already
         let mut pages_guard = self.pages.write().await;
         if let Some(page) = pages_guard.get(pid) {
-            return PageHandle::new(page.clone(), DriveManager::get().create_handle());
+            return PageHandle::new(page.clone(), StorageManager::get().create_handle());
         }
 
         // Create the new page and update the global map of pages
@@ -173,7 +173,7 @@ impl BufferPoolManager {
         pages_guard.insert(*pid, page.clone());
 
         // Create the page handle and return
-        PageHandle::new(page, DriveManager::get().create_handle())
+        PageHandle::new(page, StorageManager::get().create_handle())
     }
 
     /// Gets a thread-local page handle of the buffer pool manager, returning a [`PageHandle`] to
@@ -192,12 +192,12 @@ impl BufferPoolManager {
             }
         };
 
-        PageHandle::new(page, DriveManager::get().create_handle())
+        PageHandle::new(page, StorageManager::get().create_handle())
     }
 
-    /// Creates a thread-local [`DriveManagerHandle`] to the inner [`DriveManager`].
-    pub fn get_drive_manager(&self) -> DriveManagerHandle {
-        DriveManager::get().create_handle()
+    /// Creates a thread-local [`StorageManagerHandle`] to the inner [`StorageManager`].
+    pub fn get_storage_manager_handle(&self) -> StorageManagerHandle {
+        StorageManager::get().create_handle()
     }
 
     /// Creates a `tokio` thread-local [`Runtime`] that works with
@@ -208,7 +208,7 @@ impl BufferPoolManager {
     ///
     /// This function will panic if it is unable to build the [`Runtime`].
     pub fn build_thread_runtime(&self) -> Runtime {
-        let dmh = self.get_drive_manager();
+        let dmh = self.get_storage_manager_handle();
         let uring = Rc::new(dmh.get_uring());
         let uring_daemon = SendWrapper::new(uring.clone());
 

@@ -5,7 +5,7 @@
 //!
 //! Users interact with these pages via the [`PageHandle`] type, which is essentially a thread-local
 //! wrapper around a pointer to a [`Page`] and an `io_uring` instance (which is further encapsulated
-//! by a [`DriveManagerHandle`](crate::drive::drive_manager::DriveManagerHandle)).
+//! by a [`StorageManagerHandle`](crate::storage::storage_manager::StorageManagerHandle)).
 //!
 //! Once a user has access to a [`PageHandle`], they can create a [`ReadPageGuard`] or a
 //! [`WritePageGuard`] to access the inner buffer frame and data in either read-locked or

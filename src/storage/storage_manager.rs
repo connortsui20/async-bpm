@@ -1,7 +1,7 @@
-//! This module contains the definition and implementation of both [`DriveManager`] and
-//! [`DriveManagerHandle`].
+//! This module contains the definition and implementation of both [`StorageManager`] and
+//! [`StorageManagerHandle`].
 //!
-//! The [`DriveManager`] type is intended to be an abstraction around all of the persistent /
+//! The [`StorageManager`] type is intended to be an abstraction around all of the persistent /
 //! non-volatile storage that the system has access to.
 //!
 //! This buffer pool manager is built on the assumption that any storage requests made can be
@@ -26,12 +26,12 @@ use std::{
 };
 use thread_local::ThreadLocal;
 
-/// The global drive manager instance.
-static DRIVE_MANAGER: OnceLock<DriveManager> = OnceLock::new();
+/// The global storage manager instance.
+static STORAGE_MANAGER: OnceLock<StorageManager> = OnceLock::new();
 
 /// Manages reads into and writes from `Frame`s between memory and persistent storage.
 #[derive(Debug)]
-pub struct DriveManager {
+pub struct StorageManager {
     /// A slice of buffers, used solely to register into new [`IoUringAsync`] instances.
     ///
     /// Right now, this only supports a single group of buffers, but in the future it should be able
@@ -44,12 +44,12 @@ pub struct DriveManager {
     /// Thread-local `IoUringAsync` instances.
     io_urings: ThreadLocal<SendWrapper<IoUringAsync>>,
 
-    /// The files storing all data. While the [`DriveManager`] has ownership, they won't be closed.
+    /// The files storing all data. While the [`StorageManager`] has ownership, they won't be closed.
     pub(crate) files: Vec<File>,
 }
 
-impl DriveManager {
-    /// Creates a new shared [`DriveManager`] instance.
+impl StorageManager {
+    /// Creates a new shared [`StorageManager`] instance.
     ///
     /// # Panics
     ///
@@ -82,37 +82,38 @@ impl DriveManager {
             files,
         };
 
-        // Set the global drive manager instance
-        DRIVE_MANAGER
+        // Set the global storage manager instance
+        STORAGE_MANAGER
             .set(dm)
-            .expect("Tried to set the global drive manager more than once")
+            .expect("Tried to set the global storage manager more than once")
     }
 
-    /// Retrieve a static reference to the global drive manager.
+    /// Retrieve a static reference to the global storage manager.
     ///
     /// # Panics
     ///
-    /// This function will panic if it is called before a call to [`DriveManager::initialize`].
+    /// This function will panic if it is called before a call to [`StorageManager::initialize`].
     pub fn get() -> &'static Self {
-        DRIVE_MANAGER
+        STORAGE_MANAGER
             .get()
-            .expect("Tried to get a reference to the drive manager before it was initialized")
+            .expect("Tried to get a reference to the storage manager before it was initialized")
     }
 
-    /// Retrieves the number of drives that the pages are stored on.
+    /// Retrieves the number of drives that the pages are stored on in persistent storage.
     ///
     /// # Panics
     ///
-    /// This function will panic if it is called before a call to [`DriveManager::initialize`].
+    /// This function will panic if it is called before a call to [`StorageManager::initialize`].
     pub fn get_num_drives() -> usize {
         Self::get().files.len()
     }
 
-    /// Creates a thread-local [`DriveManagerHandle`] that has a reference back to this drive manager.
-    pub fn create_handle(&self) -> DriveManagerHandle {
+    /// Creates a thread-local [`StorageManagerHandle`] that has a reference back to this storage
+    /// manager.
+    pub fn create_handle(&self) -> StorageManagerHandle {
         let uring = self.get_thread_local_uring();
 
-        DriveManagerHandle { uring }
+        StorageManagerHandle { uring }
     }
 
     /// A helper function that either retrieves the already-created thread-local [`IoUringAsync`]
@@ -140,14 +141,14 @@ impl DriveManager {
     }
 }
 
-/// A thread-local handle to a [`DriveManager`] that contains an inner [`IoUringAsync`] instance.
+/// A thread-local handle to a [`StorageManager`] that contains an inner [`IoUringAsync`] instance.
 #[derive(Debug, Clone)]
-pub struct DriveManagerHandle {
+pub struct StorageManagerHandle {
     /// The inner `io_uring` instance wrapped with asynchronous capabilities and methods.
     uring: IoUringAsync,
 }
 
-impl DriveManagerHandle {
+impl StorageManagerHandle {
     /// Reads a page's data into a `Frame` from persistent storage.
     ///
     /// This function takes as input a [`PageId`] that represents a unique logical page and a
@@ -162,7 +163,7 @@ impl DriveManagerHandle {
     /// On any sort of error, we still need to return the `Frame` back to the caller, so both the
     /// `Ok` and `Err` cases return the frame back.
     pub async fn read_into(&self, pid: PageId, mut frame: Frame) -> Result<Frame, Frame> {
-        let dm: &DriveManager = DriveManager::get();
+        let dm: &StorageManager = StorageManager::get();
         let file_index = pid.file_index();
         let fd = Fd(dm.files[file_index].as_raw_fd());
 
@@ -199,7 +200,7 @@ impl DriveManagerHandle {
     /// On any sort of error, we still need to return the `Frame` back to the caller, so both the
     /// `Ok` and `Err` cases return the frame back.
     pub async fn write_from(&self, pid: PageId, frame: Frame) -> Result<Frame, Frame> {
-        let dm: &DriveManager = DriveManager::get();
+        let dm: &StorageManager = StorageManager::get();
         let file_index = pid.file_index();
         let fd = Fd(dm.files[file_index].as_raw_fd());
 

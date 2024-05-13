@@ -1,6 +1,6 @@
 //! Definitions and types related to logical pages of data.
 
-use crate::storage::{storage_manager::DriveManager, frame::Frame};
+use crate::storage::{frame::Frame, storage_manager::StorageManager};
 use derivative::Derivative;
 use std::{fmt::Display, sync::Arc};
 use tokio::sync::RwLock;
@@ -60,13 +60,13 @@ impl PageId {
 
     /// Returns the index of the file that holds this page on persistent storage.
     pub(crate) fn file_index(&self) -> usize {
-        (self.inner % DriveManager::get_num_drives() as u64) as usize
+        (self.inner % StorageManager::get_num_drives() as u64) as usize
     }
 
     /// Returns the offset of this page's data on persistent storage into the file returned by
     /// [`PageId::fd()`].
     pub(crate) fn offset(&self) -> u64 {
-        (self.as_u64() / DriveManager::get_num_drives() as u64) * PAGE_SIZE as u64
+        (self.as_u64() / StorageManager::get_num_drives() as u64) * PAGE_SIZE as u64
     }
 }
 
