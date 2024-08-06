@@ -6,6 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+derivative = "2.2.0"
+send_wrapper = "0.6.0"
+thread_local = "1.1.8"
 tokio = { version = "1.37.0", features = ["sync"] }
 tokio-uring = "0.5.0"
 
