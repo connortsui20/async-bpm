@@ -1,10 +1,21 @@
+//! This module contains the definition and implementation of [`Frame`] and [`FrameGroup`], which
+//! are types that represent the buffer frames that the buffer pool manager is in charge of.
+//!
+//! A [`Frame`] is intended to hold [`PAGE_SIZE`] bytes of data, and is also intended to be shared
+//! with the the kernel to avoid unnecessary `memcpy`s from the kernel's internal buffers into
+//! user-space buffers.
+//!
+//! A [`FrameGroup`] instance groups [`Frame`]s together so that eviction algorithms can be run on
+//! pre-determined groups of frames without having to manage which logical pages are in memory or
+//! not in memory.
+
 use crate::page::{Page, PAGE_SIZE};
 use std::{
-    ops::{Deref, DerefMut, Range},
+    ops::{Deref, DerefMut},
     sync::Arc,
 };
 use tokio::sync::Mutex;
-use tokio_uring::buf::BoundedBuf;
+use tokio_uring::buf::{IoBuf, IoBufMut};
 
 /// The number of frames in a [`FrameGroup`].
 pub const FRAME_GROUP_SIZE: usize = 64;
@@ -25,7 +36,10 @@ pub struct Frame {
 /// A fixed group of frames.
 #[derive(Debug)]
 pub(crate) struct FrameGroup {
+    /// TODO docs
     group_id: usize,
+
+    /// TODO docs
     eviction_states: Mutex<[EvictionState; FRAME_GROUP_SIZE]>,
 }
 
@@ -60,34 +74,15 @@ impl DerefMut for Frame {
     }
 }
 
-impl BoundedBuf for Frame {
-    type Buf = &'static [u8];
-
-    type Bounds = Range<usize>;
-
-    fn slice(self, range: impl std::ops::RangeBounds<usize>) -> tokio_uring::buf::Slice<Self::Buf> {
-        todo!()
-    }
-
-    fn slice_full(self) -> tokio_uring::buf::Slice<Self::Buf> {
-        todo!()
-    }
-
-    fn get_buf(&self) -> &Self::Buf {
-        todo!()
-    }
-
-    fn bounds(&self) -> Self::Bounds {
-        Range {
-            start: 0,
-            end: PAGE_SIZE,
-        }
-    }
-
-    fn from_buf_bounds(buf: Self::Buf, bounds: Self::Bounds) -> Self {
-        todo!("Do we need to support this?")
-    }
-
+/// # Safety
+///
+/// The safety contract for `IoBuf` is as follows:
+/// > Buffers passed to `io-uring` operations must reference a stable memory region. While the
+/// > runtime holds ownership to a buffer, the pointer returned by `stable_ptr` must remain valid
+/// > even if the `IoBuf` value is moved.
+///
+/// Since we only use a static reference to correctly allocated memory, all operations are safe.
+unsafe impl IoBuf for Frame {
     fn stable_ptr(&self) -> *const u8 {
         self.buf.as_ptr()
     }
@@ -98,5 +93,23 @@ impl BoundedBuf for Frame {
 
     fn bytes_total(&self) -> usize {
         PAGE_SIZE
+    }
+}
+
+/// # Safety
+///
+/// The safety contract for `IoBufMut` is as follows:
+/// > Buffers passed to `io-uring` operations must reference a stable memory region. While the
+/// > runtime holds ownership to a buffer, the pointer returned by `stable_mut_ptr` must remain
+/// > valid even if the `IoBufMut` value is moved.
+///
+/// Since we only use a static reference to correctly allocated memory, all operations are safe.
+unsafe impl IoBufMut for Frame {
+    fn stable_mut_ptr(&mut self) -> *mut u8 {
+        self.buf.as_mut_ptr()
+    }
+
+    unsafe fn set_init(&mut self, _pos: usize) {
+        // All bytes are initialized on allocation, so this function is a no-op.
     }
 }

@@ -1,23 +1,11 @@
-use page::Page;
-use std::{
-    collections::HashMap,
-    sync::{Arc, OnceLock},
-};
-use tokio::sync::RwLock;
+#![doc = include_str!("../README.md")]
+#![cfg(target_family = "unix")]
+#![warn(missing_docs)]
+#![warn(clippy::missing_docs_in_private_items)]
+#![warn(clippy::missing_errors_doc)]
+#![warn(clippy::missing_panics_doc)]
+#![warn(clippy::missing_safety_doc)]
 
+pub mod bpm;
 pub mod page;
 pub mod storage;
-
-/// The global buffer pool manager instance.
-static BPM: OnceLock<BufferPoolManager> = OnceLock::new();
-
-/// A parallel Buffer Pool Manager that manages bringing logical pages from persistent storage into
-/// memory via shared and fixed buffer frames.
-#[derive(Debug)]
-pub struct BufferPoolManager {
-    /// The total number of buffer frames this [`BufferPoolManager`] manages.
-    num_frames: usize,
-
-    /// A mapping between unique [`PageId`]s and shared [`PageRef`] handles.
-    pages: RwLock<HashMap<usize, Arc<Page>>>,
-}
