@@ -10,6 +10,7 @@
 //! not in memory.
 
 use crate::page::{Page, PAGE_SIZE};
+use async_channel::{Receiver, Sender};
 use std::{
     ops::{Deref, DerefMut},
     sync::Arc,
@@ -39,8 +40,14 @@ pub(crate) struct FrameGroup {
     /// TODO docs
     group_id: usize,
 
-    /// TODO docs
+    /// The states of the [`Frame`]s that belong to this `FrameGroup`.
+    ///
+    /// Only 1 thread is allowed to modify eviction states at any time, thus we protect them with an
+    /// asynchronous [`Mutex`].
     eviction_states: Mutex<[EvictionState; FRAME_GROUP_SIZE]>,
+
+    /// An asynchronous channel of free [`Frame`]s.
+    free_frames: (Sender<Frame>, Receiver<Frame>),
 }
 
 /// The enum representing the possible values for [`EvictionState`].

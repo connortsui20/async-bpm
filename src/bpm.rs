@@ -33,8 +33,5 @@ pub struct BufferPoolManager {
     pages: RwLock<HashMap<usize, Arc<Page>>>,
 
     /// TODO docs
-    frames: Vec<Frame>,
-
-    /// TODO docs
     groups: Vec<FrameGroup>,
 }
