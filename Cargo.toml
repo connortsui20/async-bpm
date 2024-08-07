@@ -6,17 +6,16 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-async-channel = "2.3.1"
-bytes = "1.7.1"
-derivative = "2.2.0"
-rand = "0.8.5"
-send_wrapper = "0.6.0"
-thread_local = "1.1.8"
-tokio = { version = "1.37.0", features = ["sync"] }
-tokio-uring = "0.5.0"
+async-channel = "2.3"
+derivative = "2.2"
+rand = "0.8"
+send_wrapper = "0.6"
+thread_local = "1.1"
+tokio = { version = "1.37", features = ["sync"] }
+tokio-uring = "0.5"
 
 [dev-dependencies]
-tokio = { version = "1.37.0", features = ["full"] }
+tokio = { version = "1.37", features = ["full"] }
 
 [profile.release]
 debug = true
