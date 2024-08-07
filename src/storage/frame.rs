@@ -59,7 +59,7 @@ pub(crate) struct FrameGroup {
 ///
 /// Note that these states may not necessarily be synced to the actual state of the [`Frame`]s, and
 /// these only serve as hints to the eviction algorithm.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum EvictionState {
     /// Represents a frequently / recently accessed [`Frame`](super::frame::Frame) that currently
     /// holds a [`Page`](crate::page::Page)'s data.
@@ -73,7 +73,24 @@ pub(crate) enum EvictionState {
     Cold,
 }
 
+impl Default for EvictionState {
+    fn default() -> Self {
+        Self::Cold
+    }
+}
+
 impl Frame {
+    /// Creates a new `Frame` given a static mutable buffer and a frame ID.
+    ///
+    /// All `Frame`s are initialized without any page owner.
+    pub(crate) fn new(frame_id: usize, buf: &'static mut [u8]) -> Self {
+        Self {
+            frame_id,
+            buf,
+            page_owner: None,
+        }
+    }
+
     /// Gets the frame group ID of the group that this frame belongs to.
     pub(crate) fn group_id(&self) -> usize {
         self.frame_id / FRAME_GROUP_SIZE
@@ -111,8 +128,25 @@ impl Frame {
 }
 
 impl FrameGroup {
-    pub fn new() -> Self {
-        todo!("Take in a fixed amount of frames and a group id")
+    pub async fn new<I>(frames: I) -> Self
+    where
+        I: IntoIterator<Item = Frame>,
+    {
+        let (rx, tx) = async_channel::bounded(FRAME_GROUP_SIZE);
+
+        let mut counter = 0;
+        for frame in frames {
+            rx.send(frame).await.expect("Channel cannot be closed");
+            counter += 1;
+        }
+        debug_assert_eq!(counter, FRAME_GROUP_SIZE);
+
+        let eviction_states = core::array::from_fn(|_| EvictionState::default());
+
+        Self {
+            eviction_states: Mutex::new(eviction_states),
+            free_frames: (rx, tx),
+        }
     }
 
     /// Gets a free frame in this `FrameGroup`.

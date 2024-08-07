@@ -10,8 +10,11 @@
 //! pool manager would work.
 
 use crate::{
-    page::{Page, PageHandle, PageId},
-    storage::{frame::FrameGroup, storage_manager::StorageManager},
+    page::{Page, PageHandle, PageId, PAGE_SIZE},
+    storage::{
+        frame::{Frame, FrameGroup, FRAME_GROUP_SIZE},
+        storage_manager::StorageManager,
+    },
 };
 use rand::prelude::*;
 use std::{
@@ -33,7 +36,7 @@ pub struct BufferPoolManager {
     /// A mapping between unique [`PageId`]s and shared [`PageRef`] handles.
     pages: RwLock<HashMap<PageId, Arc<Page>>>,
 
-    /// TODO docs
+    /// All of the [`FrameGroup`]s that hold the [`Frame`]s that this buffer pool manages.
     frame_groups: Vec<Arc<FrameGroup>>,
 }
 
@@ -54,8 +57,48 @@ impl BufferPoolManager {
     ///
     /// This function will panic if `num_frames` is not a multiple of
     /// [`FRAME_GROUP_SIZE`]((crate::storage::frame::FRAME_GROUP_SIZE)).
-    pub fn initialize(_num_frames: usize, _capacity: usize) {
-        todo!()
+    pub async fn initialize(num_frames: usize) {
+        assert!(
+            BPM.get().is_none(),
+            "Tried to initialize a BufferPoolManager more than once"
+        );
+        assert!(num_frames != 0);
+        assert_eq!(num_frames % FRAME_GROUP_SIZE, 0);
+
+        let num_groups = num_frames / FRAME_GROUP_SIZE;
+
+        // Allocate all of the buffer memory up front and initialize to 0.
+        let bytes: &'static mut [u8] = vec![0u8; num_frames * PAGE_SIZE].leak();
+
+        // Divide the memory up into `PAGE_SIZE` chunks.
+        let buffers: Vec<&'static mut [u8]> = bytes.chunks_exact_mut(PAGE_SIZE).collect();
+        assert_eq!(buffers.len(), num_frames);
+
+        let mut frames: Vec<Frame> = buffers
+            .into_iter()
+            .enumerate()
+            .map(|(i, buf)| Frame::new(i, buf))
+            .collect();
+
+        let mut frame_groups: Vec<Arc<FrameGroup>> = Vec::with_capacity(num_groups);
+
+        for _ in 0..num_groups {
+            let group: Vec<Frame> = (0..FRAME_GROUP_SIZE)
+                .map(|_| frames.pop().expect("Somehow ran out of frames"))
+                .collect();
+            frame_groups.push(Arc::new(FrameGroup::new(group).await));
+        }
+
+        // Create the bpm and set it as the global static bpm instance
+        BPM.set(Self {
+            num_frames,
+            pages: RwLock::new(HashMap::with_capacity(num_frames)),
+            frame_groups,
+        })
+        .expect("Tried to initialize the buffer pool manager more than once");
+
+        // Also initialize the global `StorageManager` instance
+        StorageManager::initialize().await;
     }
 
     /// Retrieve a static reference to the global buffer pool manager.
