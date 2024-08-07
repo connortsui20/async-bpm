@@ -18,13 +18,13 @@ use tokio_uring::fs::{File, OpenOptions};
 use tokio_uring::BufResult;
 
 /// The global storage manager instance.
-static STORAGE_MANAGER: OnceLock<StorageManager> = OnceLock::new();
+pub(crate) static STORAGE_MANAGER: OnceLock<StorageManager> = OnceLock::new();
 
 /// Manages reads into and writes from `Frame`s between memory and persistent storage.
 #[derive(Debug)]
-pub struct StorageManager {
+pub(crate) struct StorageManager {
     /// TODO docs
-    pub(crate) file: ThreadLocal<SendWrapper<Rc<File>>>,
+    file: ThreadLocal<SendWrapper<Rc<File>>>,
 }
 
 impl StorageManager {
@@ -33,7 +33,7 @@ impl StorageManager {
     /// # Panics
     ///
     /// Panics on I/O errors, or if this function is called a second time after a successful return.
-    pub async fn initialize() {
+    pub(crate) async fn initialize() {
         let sm = Self {
             file: ThreadLocal::new(),
         };
@@ -51,7 +51,7 @@ impl StorageManager {
     /// # Panics
     ///
     /// This function will panic if it is called before a call to [`StorageManager::initialize`].
-    pub fn get() -> &'static Self {
+    pub(crate) fn get() -> &'static Self {
         STORAGE_MANAGER
             .get()
             .expect("Tried to get a reference to the storage manager before it was initialized")
@@ -63,7 +63,7 @@ impl StorageManager {
     /// # Errors
     ///
     /// Returns an error if unable to create a [`File`] to the database files on disk.
-    pub async fn create_handle(&self) -> Result<StorageManagerHandle> {
+    pub(crate) async fn create_handle(&self) -> Result<StorageManagerHandle> {
         if let Some(file) = self.file.get() {
             return Ok(StorageManagerHandle { file: file.clone() });
         }
@@ -86,7 +86,7 @@ impl StorageManager {
     /// # Panics
     ///
     /// This function will panic if it is called before a call to [`StorageManager::initialize`].
-    pub fn get_num_drives() -> usize {
+    pub(crate) fn get_num_drives() -> usize {
         1 // TODO
     }
 }
@@ -95,7 +95,7 @@ impl StorageManager {
 ///
 /// TODO this might not be named appropriately
 #[derive(Debug, Clone)]
-pub struct StorageManagerHandle {
+pub(crate) struct StorageManagerHandle {
     /// The inner `io_uring` instance wrapped with asynchronous capabilities and methods.
     file: SendWrapper<Rc<File>>,
 }
@@ -114,7 +114,7 @@ impl StorageManagerHandle {
     ///
     /// On any sort of error, we still need to return the `Frame` back to the caller, so both the
     /// `Ok` and `Err` cases return the frame back.
-    pub async fn read_into(&self, pid: PageId, frame: Frame) -> BufResult<(), Frame> {
+    pub(crate) async fn read_into(&self, pid: PageId, frame: Frame) -> BufResult<(), Frame> {
         let offset = pid.offset();
         self.file.read_exact_at(frame, offset).await
     }
@@ -132,7 +132,7 @@ impl StorageManagerHandle {
     ///
     /// On any sort of error, we still need to return the `Frame` back to the caller, so both the
     /// `Ok` and `Err` cases return the frame back.
-    pub async fn write_from(&self, pid: PageId, frame: Frame) -> BufResult<(), Frame> {
+    pub(crate) async fn write_from(&self, pid: PageId, frame: Frame) -> BufResult<(), Frame> {
         let offset = pid.offset();
         self.file.write_all_at(frame, offset).await
     }

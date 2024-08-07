@@ -5,9 +5,8 @@
 //! with the the kernel to avoid unnecessary `memcpy`s from the kernel's internal buffers into
 //! user-space buffers.
 //!
-//! A [`FrameGroup`] instance groups [`Frame`]s together so that eviction algorithms can be run on
-//! pre-determined groups of frames without having to manage which logical pages are in memory or
-//! not in memory.
+//! A [`FrameGroup`] instance groups [`Frame`]s together so that evictions do not have to search
+//! every single [`Frame`] in the buffer pool for an eviction candidate.
 
 use crate::storage::storage_manager::StorageManager;
 use crate::{
@@ -28,13 +27,18 @@ pub const FRAME_GROUP_SIZE: usize = 64;
 
 /// An owned buffer frame, intended to be shared between user and kernel space.
 #[derive(Debug)]
-pub struct Frame {
+pub(crate) struct Frame {
     /// The unique ID of this `Frame`.
     ///
-    /// TODO more docs
+    /// Each `Frame` is assigned a monotonically increasing ID, where every chunk of
+    /// [`FRAME_GROUP_SIZE`] `Frame`s represent a single [`FrameGroup`].
     frame_id: usize,
 
-    /// TODO docs
+    /// The owner of this `Frame`, if one exists.
+    ///
+    /// If a [`Page`] "owns" this `Frame` (the `Frame` holds the [`Page`]s data), then it is the
+    /// responsibility of the [`Page`] to ensure that they place an [`Arc`] into this field via
+    /// [`replace_page_owner`](Self::replace_page_owner).
     page_owner: Option<Arc<Page>>,
 
     /// The buffer that this `Frame` holds ownership over.
@@ -45,6 +49,23 @@ pub struct Frame {
 }
 
 /// A fixed group of frames.
+///
+/// The `FrameGroup` is a data structure intended to make finding evictions easier for the system.
+/// Instead of requiring every eviction task to scan the entire buffer pool for an eviction
+/// candidate, we group the frames together and randomly choose one `FrameGroup` from which we will
+/// choose an eviction candidate from instead.
+///
+/// By grouping frames together as such, we can say that a `Frame` can be in one of three states:
+/// - A `Frame` can be owned by a [`Page`]
+///     - The `Frame`'s [`EvictionState`] can be either [`Hot`] or [`Cool`]
+/// - A `Frame` can have an active task trying to evict the data the `Frame` holds
+///     - The `Frame`'s [`EvictionState`] can be either [`Cool`] or [`Cold`]
+/// - A `Frame` can be in the free list of frames in a `FrameGroup`
+///     - The `Frame`'s [`EvictionState`] _must_ be [`Cold`]
+///
+/// [`Hot`]: EvictionState::Hot
+/// [`Cool`]: EvictionState::Cool
+/// [`Cold`]: EvictionState::Cold
 #[derive(Debug)]
 pub(crate) struct FrameGroup {
     /// The states of the [`Frame`]s that belong to this `FrameGroup`.
@@ -53,12 +74,12 @@ pub(crate) struct FrameGroup {
     /// asynchronous [`Mutex`].
     eviction_states: Mutex<[EvictionState; FRAME_GROUP_SIZE]>,
 
-    /// An asynchronous channel of free [`Frame`]s.
+    /// An asynchronous channel of free [`Frame`]s. Behaves as the free list of frames.
     free_frames: (Sender<Frame>, Receiver<Frame>),
 }
 
-/// The enum representing the possible states that a [`Frame`] can be in with respect to the eviction
-/// algorithm.
+/// The enum representing the possible states that a [`Frame`] can be in with respect to the
+/// eviction algorithm.
 ///
 /// Note that these states may not necessarily be synced to the actual state of the [`Frame`]s, and
 /// these only serve as hints to the eviction algorithm.
@@ -73,12 +94,6 @@ pub(crate) enum EvictionState {
     /// Represents either a [`Frame`] that does not hold any [`Page`] data, or a [`Frame`] that has
     /// an active thread trying to evict it from memory.
     Cold,
-}
-
-impl Default for EvictionState {
-    fn default() -> Self {
-        Self::Cold
-    }
 }
 
 impl Frame {
@@ -106,22 +121,25 @@ impl Frame {
     }
 
     /// Gets a pointer to the [`Page`] that owns this `Frame`, if this `Frame` is owned by any.
-    pub fn get_page_owner(&self) -> Option<&Arc<Page>> {
+    pub(crate) fn get_page_owner(&self) -> Option<&Arc<Page>> {
         self.page_owner.as_ref()
     }
 
     /// Replaces the owning [`Page`] of this `Frame` with another [`Page`].
-    pub fn replace_page_owner(&mut self, page: Arc<Page>) -> Option<Arc<Page>> {
+    pub(crate) fn replace_page_owner(&mut self, page: Arc<Page>) -> Option<Arc<Page>> {
         self.page_owner.replace(page)
     }
 
     /// Replaces the owning [`Page`] of this `Frame` with `None`.
-    pub fn evict_page_owner(&mut self) -> Option<Arc<Page>> {
+    pub(crate) fn evict_page_owner(&mut self) -> Option<Arc<Page>> {
         self.page_owner.take()
     }
 
     /// Updates the eviction state after this frame has been accessed.
-    pub async fn record_access(&self) {
+    ///
+    /// This function will simply update the [`EvictionState`] of the `Frame` to
+    /// [`Hot`](EvictionState::Hot).
+    pub(crate) async fn record_access(&self) {
         let group = self.group();
         let index = self.frame_id % FRAME_GROUP_SIZE;
 
@@ -251,6 +269,12 @@ impl EvictionState {
             Self::Cool(page) => Some(page.clone()),
             Self::Cold => None,
         }
+    }
+}
+
+impl Default for EvictionState {
+    fn default() -> Self {
+        Self::Cold
     }
 }
 
