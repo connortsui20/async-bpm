@@ -91,7 +91,9 @@ impl StorageManager {
     }
 }
 
-/// A thread-local handle to a [`StorageManager`] that contains an inner [`IoUringAsync`] instance.
+/// A thread-local handle to a [`StorageManager`].
+///
+/// TODO this might not be named appropriately
 #[derive(Debug, Clone)]
 pub struct StorageManagerHandle {
     /// The inner `io_uring` instance wrapped with asynchronous capabilities and methods.

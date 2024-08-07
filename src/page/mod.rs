@@ -11,8 +11,8 @@
 //! [`WritePageGuard`] to access the inner buffer frame and data in either read-locked or
 //! write-locked mode.
 //!
-//! Finally, this module provides other wrapper types like [`PageId`] and [`PageRef`] to facilitate
-//! easy use of the [`Page`] API.
+//! Finally, this module provides other wrapper types like [`PageId`] to facilitate easy use of the
+//! [`Page`] API.
 
 mod page_guard;
 mod page_handle;

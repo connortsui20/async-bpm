@@ -64,15 +64,14 @@ pub(crate) struct FrameGroup {
 /// these only serve as hints to the eviction algorithm.
 #[derive(Debug, Clone)]
 pub(crate) enum EvictionState {
-    /// Represents a frequently / recently accessed [`Frame`](super::frame::Frame) that currently
-    /// holds a [`Page`](crate::page::Page)'s data.
+    /// Represents a frequently / recently accessed [`Frame`] that currently holds a [`Page`]'s
+    /// data.
     Hot(Arc<Page>),
-    /// Represents an infrequently or old [`Frame`](super::frame::Frame) that might be evicted soon,
-    /// and also still currently holds a [`Page`](crate::page::Page)'s data.
+    /// Represents an infrequently or old [`Frame`] that might be evicted soon, and also still
+    /// currently holds a [`Page`] data.
     Cool(Arc<Page>),
-    /// Represents either a [`Frame`](super::frame::Frame) that does not hold any
-    /// [`Page`](crate::page::Page)'s data, or a [`Frame`] that has an active thread trying to evict
-    /// it from memory.
+    /// Represents either a [`Frame`] that does not hold any [`Page`] data, or a [`Frame`] that has
+    /// an active thread trying to evict it from memory.
     Cold,
 }
 
@@ -233,15 +232,16 @@ impl FrameGroup {
 }
 
 impl EvictionState {
-    /// Runs the cooling algorithm, returning a [`PageRef`] if we want to evict the page.
+    /// Runs the cooling algorithm, returning an optional [`Page`] if we want to evict the
+    /// page.
     ///
-    /// If the state is [`Hot`](FrameTemperature::Hot), then this function cools it down to be
-    /// [`Cool`](FrameTemperature::Cool), and if it was already [`Cool`](FrameTemperature::Cool),
-    /// then this function does nothing. It is on the caller to deal with eviction of the
-    /// [`Cool`](FrameTemperature::Cool) page via the [`PageRef`] that is returned.
+    /// If the state is [`Hot`](EvictionState::Hot), then this function cools it down to be
+    /// [`Cool`](EvictionState::Cool), and if it was already [`Cool`](EvictionState::Cool), then
+    /// this function does nothing. It is on the caller to deal with eviction of the
+    /// [`Cool`](EvictionState::Cool) page via the [`Page`] that is returned.
     ///
-    /// If the state transitions to [`Cold`](FrameTemperature::Cold), this function will return the
-    /// [`PageRef`] that it used to hold.
+    /// If the state transitions to [`Cold`](EvictionState::Cold), this function will return the
+    /// [`Page`] that it used to hold.
     pub(crate) fn cool(&mut self) -> Option<Arc<Page>> {
         match self {
             Self::Hot(page) => {

@@ -34,7 +34,7 @@ pub struct BufferPoolManager {
     /// The total number of buffer frames this [`BufferPoolManager`] manages.
     num_frames: usize,
 
-    /// A mapping between unique [`PageId`]s and shared [`PageRef`] handles.
+    /// A mapping between unique [`PageId`]s and shared [`Page`]s.
     pages: RwLock<HashMap<PageId, Arc<Page>>>,
 
     /// All of the [`FrameGroup`]s that hold the [`Frame`]s that this buffer pool manages.
@@ -43,16 +43,6 @@ pub struct BufferPoolManager {
 
 impl BufferPoolManager {
     /// Constructs a new buffer pool manager with the given number of [`PAGE_SIZE`]ed buffer frames.
-    ///
-    /// The argument `capacity` should be the starting number of logical pages the user of the
-    /// [`BufferPoolManager`] wishes to use, as it will allocate enough space persistent storage to
-    /// initially accommodate that number. TODO this is subject to change once the storage manager
-    /// improves.
-    ///
-    /// This function will create two copies of the buffers allocated, 1 copy for user access
-    /// through `Frame`s and `FrameGroup`s, and another copy for kernel access by registering the
-    /// buffers into the `io_uring` instance via
-    /// [`register_buffers`](io_uring::Submitter::register_buffers).
     ///
     /// # Panics
     ///

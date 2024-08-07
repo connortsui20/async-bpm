@@ -14,7 +14,7 @@ use tokio::sync::RwLockWriteGuard;
 #[derive(Derivative)]
 #[derivative(Debug, Clone)]
 pub struct PageHandle {
-    /// A shared pointer to the [`Page`](super::Page) object.
+    /// A shared pointer to the [`Page`] object.
     pub(crate) page: Arc<Page>,
 
     /// A thread-local handle to the storage manager.

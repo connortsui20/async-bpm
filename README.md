@@ -8,7 +8,7 @@ This model is aimed at a thread-per-core model with multiple persistent storage 
 This implies that tasks (coroutines) given to worker threads cannot be moved between threads
 (or in other words, are `!Send`).
 So it is on a global scheduler to assign tasks to worker threads appropriately.
-Once a task has been given to a worker thread, then the asynchronous runtime's
+Once a task has been given to a worker thread, the asynchronous runtime's
 scheduler is in charge of managing the cooperative tasks.
 
 An implication of the above is that this model will not work with
