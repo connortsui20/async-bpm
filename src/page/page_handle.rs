@@ -21,13 +21,13 @@ pub struct PageHandle {
     ///
     /// By including this field, [`PageHandle`] is `!Send` and `!Sync`.
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    pub(crate) dm: StorageManagerHandle,
+    pub(crate) sm: StorageManagerHandle,
 }
 
 impl PageHandle {
     /// Creates a new page handle.
-    pub(crate) fn new(page: Arc<Page>, dm: StorageManagerHandle) -> Self {
-        Self { page, dm }
+    pub(crate) fn new(page: Arc<Page>, sm: StorageManagerHandle) -> Self {
+        Self { page, sm }
     }
 
     /// Gets a read guard on a logical page, which guarantees the data is in memory.
@@ -124,7 +124,7 @@ impl PageHandle {
         assert!(none.is_none());
 
         // Read the data in from persistent storage via the storage manager handle
-        let (res, frame) = self.dm.read_into(self.page.pid, frame).await;
+        let (res, frame) = self.sm.read_into(self.page.pid, frame).await;
         res.expect("TODO");
 
         // Give ownership of the frame to the actual page

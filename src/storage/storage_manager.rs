@@ -62,7 +62,7 @@ impl StorageManager {
     ///
     /// # Errors
     ///
-    /// TODO docs
+    /// Returns an error if unable to create a [`File`] to the database files on disk.
     pub async fn create_handle(&self) -> Result<StorageManagerHandle> {
         if let Some(file) = self.file.get() {
             return Ok(StorageManagerHandle { file: file.clone() });

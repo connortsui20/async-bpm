@@ -17,6 +17,7 @@ use crate::{
     },
 };
 use rand::prelude::*;
+use std::io::Result;
 use std::{
     collections::HashMap,
     sync::{atomic::AtomicBool, Arc, OnceLock},
@@ -135,14 +136,18 @@ impl BufferPoolManager {
     /// the logical page data.
     ///
     /// If the page already exists, this function will return that instead.
-    async fn create_page(&self, pid: &PageId) -> PageHandle {
+    ///
+    /// # Errors
+    ///
+    /// If this function is unable to create a [`File`](tokio_uring::fs::File), this function will
+    /// raise the I/O error in the form of [`Result`].
+    async fn create_page(&self, pid: &PageId) -> Result<PageHandle> {
+        let sm = StorageManager::get().create_handle().await?;
+
         // First check if it exists already
         let mut pages_guard = self.pages.write().await;
         if let Some(page) = pages_guard.get(pid) {
-            return PageHandle::new(
-                page.clone(),
-                StorageManager::get().create_handle().await.expect("TODO"),
-            );
+            return Ok(PageHandle::new(page.clone(), sm));
         }
 
         // Create the new page and update the global map of pages
@@ -155,17 +160,21 @@ impl BufferPoolManager {
         pages_guard.insert(*pid, page.clone());
 
         // Create the page handle and return
-        PageHandle::new(
-            page,
-            StorageManager::get().create_handle().await.expect("TODO"),
-        )
+        Ok(PageHandle::new(page, sm))
     }
 
     /// Gets a thread-local page handle of the buffer pool manager, returning a [`PageHandle`] to
     /// the logical page data.
     ///
     /// If the page does not already exist, this function will create it and then return it.
-    pub async fn get_page(&self, pid: &PageId) -> PageHandle {
+    ///
+    /// # Errors
+    ///
+    /// If this function is unable to create a [`File`](tokio_uring::fs::File), this function will
+    /// raise the I/O error in the form of [`Result`].
+    pub async fn get_page(&self, pid: &PageId) -> Result<PageHandle> {
+        let sm = StorageManager::get().create_handle().await?;
+
         let pages_guard = self.pages.read().await;
 
         // Get the page if it exists, otherwise create it and return
@@ -177,9 +186,6 @@ impl BufferPoolManager {
             }
         };
 
-        PageHandle::new(
-            page,
-            StorageManager::get().create_handle().await.expect("TODO"),
-        )
+        Ok(PageHandle::new(page, sm))
     }
 }

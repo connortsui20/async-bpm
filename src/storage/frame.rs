@@ -28,7 +28,9 @@ pub const FRAME_GROUP_SIZE: usize = 64;
 /// An owned buffer frame, intended to be shared between user and kernel space.
 #[derive(Debug)]
 pub struct Frame {
-    // The unique ID of this `Frame`. TODO
+    /// The unique ID of this `Frame`.
+    ///
+    /// TODO more docs
     frame_id: usize,
 
     /// TODO docs
@@ -96,24 +98,29 @@ impl Frame {
         self.frame_id / FRAME_GROUP_SIZE
     }
 
+    /// Gets an [`Arc`] to the [`FrameGroup`] that this frame belongs to.
     pub(crate) fn group(&self) -> Arc<FrameGroup> {
         let bpm = BufferPoolManager::get();
 
         bpm.get_frame_group(self.group_id())
     }
 
+    /// Gets a pointer to the [`Page`] that owns this `Frame`, if this `Frame` is owned by any.
     pub fn get_page_owner(&self) -> Option<&Arc<Page>> {
         self.page_owner.as_ref()
     }
 
+    /// Replaces the owning [`Page`] of this `Frame` with another [`Page`].
     pub fn replace_page_owner(&mut self, page: Arc<Page>) -> Option<Arc<Page>> {
         self.page_owner.replace(page)
     }
 
+    /// Replaces the owning [`Page`] of this `Frame` with `None`.
     pub fn evict_page_owner(&mut self) -> Option<Arc<Page>> {
         self.page_owner.take()
     }
 
+    /// Updates the eviction state after this frame has been accessed.
     pub async fn record_access(&self) {
         let group = self.group();
         let index = self.frame_id % FRAME_GROUP_SIZE;
@@ -128,6 +135,12 @@ impl Frame {
 }
 
 impl FrameGroup {
+    /// Creates a new [`FrameGroup`] given an iterator of [`FRAME_GROUP_SIZE`] frames.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the iterator does not contain exactly [`FRAME_GROUP_SIZE`]
+    /// frames.
     pub async fn new<I>(frames: I) -> Self
     where
         I: IntoIterator<Item = Frame>,
@@ -139,7 +152,7 @@ impl FrameGroup {
             rx.send(frame).await.expect("Channel cannot be closed");
             counter += 1;
         }
-        debug_assert_eq!(counter, FRAME_GROUP_SIZE);
+        assert_eq!(counter, FRAME_GROUP_SIZE);
 
         let eviction_states = core::array::from_fn(|_| EvictionState::default());
 

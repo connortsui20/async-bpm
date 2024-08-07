@@ -92,16 +92,15 @@ impl<'a> WritePageGuard<'a> {
 
     /// Flushes a page's data out to persistent storage.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// This function will panic if it is unable to complete the write operation to a file.
-    ///
-    /// TODO should this change? What is someone supposed to do if a flush fails?
+    /// This function will return an error if it is unable to complete the write operation to a file.
+    #[allow(clippy::missing_panics_doc)]
     pub async fn flush(&mut self) -> Result<()> {
-        assert!(self.guard.is_some());
+        debug_assert!(self.guard.is_some());
 
         // Temporarily take ownership of the frame from the guard
-        let frame = self.guard.take().expect("WritePageGuard had no Frame");
+        let frame = self.guard.take().expect("WritePageGuard somehow had no Frame");
 
         // Write the data out to persistent storage
         let (res, frame) = StorageManager::get()
