@@ -15,6 +15,7 @@ use crate::{
 };
 use async_channel::{Receiver, Sender};
 use std::io::Result;
+use std::sync::atomic::Ordering;
 use std::{
     ops::{Deref, DerefMut},
     sync::Arc,
@@ -55,13 +56,13 @@ pub(crate) struct Frame {
 /// candidate, we group the frames together and randomly choose one `FrameGroup` from which we will
 /// choose an eviction candidate from instead.
 ///
-/// By grouping frames together as such, we can say that a `Frame` can be in one of three states:
-/// - A `Frame` can be owned by a [`Page`]
-///     - The `Frame`'s [`EvictionState`] can be either [`Hot`] or [`Cool`]
-/// - A `Frame` can have an active task trying to evict the data the `Frame` holds
-///     - The `Frame`'s [`EvictionState`] can be either [`Cool`] or [`Cold`]
-/// - A `Frame` can be in the free list of frames in a `FrameGroup`
-///     - The `Frame`'s [`EvictionState`] _must_ be [`Cold`]
+/// By grouping frames together as such, we can say that a [`Frame`] can be in one of three states:
+/// - A [`Frame`] can be owned by a [`Page`]
+///     - The [`Frame`]'s [`EvictionState`] can be either [`Hot`] or [`Cool`]
+/// - A [`Frame`] can have an active task trying to evict the data the [`Frame`] holds
+///     - The [`Frame`]'s [`EvictionState`] can be either [`Cool`] or [`Cold`]
+/// - A [`Frame`] can be in the free list of frames in a `FrameGroup`
+///     - The [`Frame`]'s [`EvictionState`] _must_ be [`Cold`]
 ///
 /// [`Hot`]: EvictionState::Hot
 /// [`Cool`]: EvictionState::Cool
@@ -207,15 +208,15 @@ impl FrameGroup {
     pub async fn cool_frames(&self) -> Result<()> {
         let mut eviction_pages: Vec<Arc<Page>> = Vec::with_capacity(FRAME_GROUP_SIZE);
 
-        let mut guard = self.eviction_states.lock().await;
+        {
+            let mut evicton_guard = self.eviction_states.lock().await;
 
-        for frame_temperature in guard.iter_mut() {
-            if let Some(page) = frame_temperature.cool() {
-                eviction_pages.push(page);
+            for frame_temperature in evicton_guard.iter_mut() {
+                if let Some(page) = frame_temperature.cool() {
+                    eviction_pages.push(page);
+                }
             }
         }
-
-        drop(guard);
 
         if eviction_pages.is_empty() {
             return Ok(());
@@ -228,20 +229,24 @@ impl FrameGroup {
             // If we cannot get the write guard immediately, then someone else has it and we don't
             // need to evict this frame now.
             if let Ok(mut guard) = page.frame.try_write() {
-                // Someone might have gotten in front of us and already evicted this page
-                if guard.is_some() {
-                    // Take ownership over the frame and remove from the Page
-                    let mut frame = guard.take().unwrap();
-                    frame
-                        .evict_page_owner()
-                        .expect("Tried to evict a frame that had no page owner");
-
-                    // Write the data out to persistent storage
-                    let (res, frame) = sm.write_from(page.pid, frame).await;
-                    res?;
-
-                    self.free_frames.0.send(frame).await.unwrap();
+                // Check if someone got in front of us and already evicted this page.
+                if guard.is_none() {
+                    continue;
                 }
+
+                page.is_loaded.store(false, Ordering::Release);
+
+                // Take ownership over the frame and remove from the page.
+                let mut frame = guard.take().unwrap();
+                frame
+                    .evict_page_owner()
+                    .expect("Tried to evict a frame that had no page owner");
+
+                // Write the data out to persistent storage.
+                let (res, frame) = sm.write_from(page.pid, frame).await;
+                res?;
+
+                self.free_frames.0.send(frame).await.unwrap();
             }
         }
 

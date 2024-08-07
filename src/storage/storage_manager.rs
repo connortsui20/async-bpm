@@ -115,8 +115,7 @@ impl StorageManagerHandle {
     /// On any sort of error, we still need to return the `Frame` back to the caller, so both the
     /// `Ok` and `Err` cases return the frame back.
     pub(crate) async fn read_into(&self, pid: PageId, frame: Frame) -> BufResult<(), Frame> {
-        let offset = pid.offset();
-        self.file.read_exact_at(frame, offset).await
+        self.file.read_exact_at(frame, pid.offset()).await
     }
 
     /// Writes a page's data on a `Frame` to persistent storage.
@@ -133,7 +132,6 @@ impl StorageManagerHandle {
     /// On any sort of error, we still need to return the `Frame` back to the caller, so both the
     /// `Ok` and `Err` cases return the frame back.
     pub(crate) async fn write_from(&self, pid: PageId, frame: Frame) -> BufResult<(), Frame> {
-        let offset = pid.offset();
-        self.file.write_all_at(frame, offset).await
+        self.file.write_all_at(frame, pid.offset()).await
     }
 }

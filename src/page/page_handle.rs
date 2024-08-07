@@ -7,6 +7,7 @@ use crate::storage::frame::Frame;
 use crate::storage::storage_manager::StorageManagerHandle;
 use derivative::Derivative;
 use std::ops::Deref;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::sync::RwLockWriteGuard;
 
@@ -32,16 +33,22 @@ impl PageHandle {
 
     /// Gets a read guard on a logical page, which guarantees the data is in memory.
     pub async fn read(&self) -> ReadPageGuard {
-        let read_guard = self.page.frame.read().await;
+        // Fast path: attempt to read if we observe that the `is_loaded` flag is set.
+        if self.page.is_loaded.load(Ordering::Acquire) {
+            let read_guard = self.page.frame.read().await;
 
-        // If it is already loaded, then we're done
-        if let Some(frame) = read_guard.deref() {
-            frame.record_access().await;
-            return ReadPageGuard::new(self.page.pid, read_guard);
+            // If it is already loaded, then we're done.
+            if let Some(frame) = read_guard.deref() {
+                self.page.is_loaded.store(true, Ordering::Release);
+                frame.record_access().await;
+                return ReadPageGuard::new(self.page.pid, read_guard);
+            }
+
+            // Otherwise someone evicted the page underneath us and we need to load the page into
+            // memory with a write guard.
+            drop(read_guard);
         }
 
-        // Otherwise we need to load the page into memory with a write guard
-        drop(read_guard);
         let mut write_guard = self.page.frame.write().await;
 
         self.load(&mut write_guard).await;
@@ -52,18 +59,24 @@ impl PageHandle {
     /// Attempts to grab the read lock. If unsuccessful, this function does nothing. Otherwise, this
     /// function behaves identically to [`PageHandle::read`].
     pub async fn try_read(&self) -> Option<ReadPageGuard> {
-        let Ok(read_guard) = self.page.frame.try_read() else {
-            return None;
-        };
+        // Fast path: attempt to read if we observe that the `is_loaded` flag is set.
+        if self.page.is_loaded.load(Ordering::Acquire) {
+            let Ok(read_guard) = self.page.frame.try_read() else {
+                return None;
+            };
 
-        // If it is already loaded, then we're done
-        if let Some(frame) = read_guard.deref() {
-            frame.record_access().await;
-            return Some(ReadPageGuard::new(self.page.pid, read_guard));
+            // If it is already loaded, then we're done.
+            if let Some(frame) = read_guard.deref() {
+                self.page.is_loaded.store(true, Ordering::Release);
+                frame.record_access().await;
+                return Some(ReadPageGuard::new(self.page.pid, read_guard));
+            }
+
+            // Otherwise someone evicted the page underneath us and we need to load the page into
+            // memory with a write guard.
+            drop(read_guard);
         }
 
-        // Otherwise we need to load the page into memory with a write guard
-        drop(read_guard);
         let mut write_guard = self.page.frame.write().await;
 
         self.load(&mut write_guard).await;
@@ -75,13 +88,14 @@ impl PageHandle {
     pub async fn write(&self) -> WritePageGuard {
         let mut write_guard = self.page.frame.write().await;
 
-        // If it is already loaded, then we're done
+        // If it is already loaded, then we're done.
         if let Some(frame) = write_guard.deref() {
+            self.page.is_loaded.store(true, Ordering::Release);
             frame.record_access().await;
             return WritePageGuard::new(self.page.pid, write_guard);
         }
 
-        // Otherwise we need to load the page into memory
+        // Otherwise we need to load the page into memory.
         self.load(&mut write_guard).await;
 
         WritePageGuard::new(self.page.pid, write_guard)
@@ -94,13 +108,14 @@ impl PageHandle {
             return None;
         };
 
-        // If it is already loaded, then we're done
+        // If it is already loaded, then we're done.
         if let Some(frame) = write_guard.deref() {
+            self.page.is_loaded.store(true, Ordering::Release);
             frame.record_access().await;
             return Some(WritePageGuard::new(self.page.pid, write_guard));
         }
 
-        // Otherwise we need to load the page into memory
+        // Otherwise we need to load the page into memory.
         self.load(&mut write_guard).await;
 
         Some(WritePageGuard::new(self.page.pid, write_guard))
@@ -108,13 +123,14 @@ impl PageHandle {
 
     /// Loads page data from persistent storage into a frame in memory.
     async fn load(&self, guard: &mut RwLockWriteGuard<'_, Option<Frame>>) {
-        // If someone else got in front of us and loaded the page for us
+        // If someone else got in front of us and loaded the page for us.
         if let Some(frame) = guard.deref().deref() {
+            self.page.is_loaded.store(true, Ordering::Release);
             frame.record_access().await;
             return;
         }
 
-        // Randomly choose a `FrameGroup` to place load this page into
+        // Randomly choose a `FrameGroup` to place load this page into.
         let bpm = BufferPoolManager::get();
         let frame_group = bpm.get_random_frame_group();
 
@@ -126,12 +142,14 @@ impl PageHandle {
         let none = frame.replace_page_owner(self.page.clone());
         assert!(none.is_none());
 
-        // Read the data in from persistent storage via the storage manager handle
+        // Read the data in from persistent storage via the storage manager handle.
         let (res, frame) = self.sm.read_into(self.page.pid, frame).await;
         res.expect("TODO Have to figure out if this is a recoverable error");
 
-        // Give ownership of the frame to the actual page
+        // Give ownership of the frame to the actual page.
         let old: Option<Frame> = guard.replace(frame);
         assert!(old.is_none());
+
+        self.page.is_loaded.store(true, Ordering::Release);
     }
 }
