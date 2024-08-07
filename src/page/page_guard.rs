@@ -13,9 +13,6 @@ use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
 /// This guard can only be dereferenced in read mode, but other tasks (potentially on different
 /// worker threads) are allowed to read from this same page.
 pub struct ReadPageGuard<'a> {
-    /// The unique page ID of the page this guard read protects. TODO Does not have a use yet...
-    _pid: PageId,
-
     /// The `RwLock` read guard of the optional frame, that _must_ be the [`Some`] variant.
     ///
     /// The only reason that this guard protects an `Option<Frame>` instead of a `Frame` is because
@@ -36,10 +33,11 @@ impl<'a> ReadPageGuard<'a> {
     pub(crate) fn new(pid: PageId, guard: RwLockReadGuard<'a, Option<Frame>>) -> Self {
         assert!(
             guard.deref().is_some(),
-            "Cannot create a ReadPageGuard that does not own a Frame"
+            "Cannot create a ReadPageGuard for {} that does not own a Frame",
+            pid
         );
 
-        Self { _pid: pid, guard }
+        Self { guard }
     }
 }
 
@@ -100,7 +98,10 @@ impl<'a> WritePageGuard<'a> {
         debug_assert!(self.guard.is_some());
 
         // Temporarily take ownership of the frame from the guard
-        let frame = self.guard.take().expect("WritePageGuard somehow had no Frame");
+        let frame = self
+            .guard
+            .take()
+            .expect("WritePageGuard somehow had no Frame");
 
         // Write the data out to persistent storage
         let (res, frame) = StorageManager::get()

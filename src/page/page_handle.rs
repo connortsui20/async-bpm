@@ -119,13 +119,16 @@ impl PageHandle {
         let frame_group = bpm.get_random_frame_group();
 
         // Wait for a free frame
-        let mut frame = frame_group.get_free_frame().await;
+        let mut frame = frame_group
+            .get_free_frame()
+            .await
+            .expect("TODO figure out of this is a recoverable error");
         let none = frame.replace_page_owner(self.page.clone());
         assert!(none.is_none());
 
         // Read the data in from persistent storage via the storage manager handle
         let (res, frame) = self.sm.read_into(self.page.pid, frame).await;
-        res.expect("TODO");
+        res.expect("TODO Have to figure out if this is a recoverable error");
 
         // Give ownership of the frame to the actual page
         let old: Option<Frame> = guard.replace(frame);

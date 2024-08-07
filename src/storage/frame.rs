@@ -15,6 +15,7 @@ use crate::{
     page::{Page, PAGE_SIZE},
 };
 use async_channel::{Receiver, Sender};
+use std::io::Result;
 use std::{
     ops::{Deref, DerefMut},
     sync::Arc,
@@ -166,19 +167,27 @@ impl FrameGroup {
     ///
     /// This function will evict other frames in this `FrameGroup` if there are no free frames
     /// available.
-    pub async fn get_free_frame(&self) -> Frame {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an I/O error occurs.
+    pub async fn get_free_frame(&self) -> Result<Frame> {
         loop {
             if let Ok(frame) = self.free_frames.1.try_recv() {
-                return frame;
+                return Ok(frame);
             }
 
-            self.cool_frames().await;
+            self.cool_frames().await?;
         }
     }
 
     /// Runs the second chance / clock algorithm on all of the [`Frame`]s in this `FrameGroup`, and
     /// then evicts all of the frames that have been cooled twice.
-    pub async fn cool_frames(&self) {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an I/O error occurs.
+    pub async fn cool_frames(&self) -> Result<()> {
         let mut eviction_pages: Vec<Arc<Page>> = Vec::with_capacity(FRAME_GROUP_SIZE);
 
         let mut guard = self.eviction_states.lock().await;
@@ -192,8 +201,10 @@ impl FrameGroup {
         drop(guard);
 
         if eviction_pages.is_empty() {
-            return;
+            return Ok(());
         }
+
+        let sm = StorageManager::get().create_handle().await?;
 
         // Attempt to evict all of the already cool frames.
         for page in eviction_pages {
@@ -209,18 +220,15 @@ impl FrameGroup {
                         .expect("Tried to evict a frame that had no page owner");
 
                     // Write the data out to persistent storage
-                    let (res, frame) = StorageManager::get()
-                        .create_handle()
-                        .await
-                        .expect("TODO")
-                        .write_from(page.pid, frame)
-                        .await;
-                    res.expect("TODO");
+                    let (res, frame) = sm.write_from(page.pid, frame).await;
+                    res?;
 
                     self.free_frames.0.send(frame).await.unwrap();
                 }
             }
         }
+
+        Ok(())
     }
 }
 
