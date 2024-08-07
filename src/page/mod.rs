@@ -14,10 +14,10 @@
 //! Finally, this module provides other wrapper types like [`PageId`] and [`PageRef`] to facilitate
 //! easy use of the [`Page`] API.
 
-// mod page_guard;
-// mod page_handle;
+mod page_guard;
+mod page_handle;
 mod pagedef;
 
-// pub use page_guard::*;
-// pub use page_handle::*;
+pub use page_guard::*;
+pub use page_handle::*;
 pub use pagedef::*;

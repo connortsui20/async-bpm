@@ -9,7 +9,11 @@
 //! pre-determined groups of frames without having to manage which logical pages are in memory or
 //! not in memory.
 
-use crate::page::{Page, PAGE_SIZE};
+use crate::storage::storage_manager::StorageManager;
+use crate::{
+    bpm::BufferPoolManager,
+    page::{Page, PAGE_SIZE},
+};
 use async_channel::{Receiver, Sender};
 use std::{
     ops::{Deref, DerefMut},
@@ -24,8 +28,11 @@ pub const FRAME_GROUP_SIZE: usize = 64;
 /// An owned buffer frame, intended to be shared between user and kernel space.
 #[derive(Debug)]
 pub struct Frame {
-    // TODO is this necessary
+    // The unique ID of this `Frame`. TODO
     frame_id: usize,
+
+    /// TODO docs
+    page_owner: Option<Arc<Page>>,
 
     /// The buffer that this `Frame` holds ownership over.
     ///
@@ -37,9 +44,6 @@ pub struct Frame {
 /// A fixed group of frames.
 #[derive(Debug)]
 pub(crate) struct FrameGroup {
-    /// TODO docs
-    group_id: usize,
-
     /// The states of the [`Frame`]s that belong to this `FrameGroup`.
     ///
     /// Only 1 thread is allowed to modify eviction states at any time, thus we protect them with an
@@ -50,10 +54,11 @@ pub(crate) struct FrameGroup {
     free_frames: (Sender<Frame>, Receiver<Frame>),
 }
 
-/// The enum representing the possible values for [`EvictionState`].
+/// The enum representing the possible states that a [`Frame`] can be in with respect to the eviction
+/// algorithm.
 ///
-/// The reason this is separate from the [`EvictionState`] struct is because we cannot represent do
-/// atomic operations on enums in Rust.
+/// Note that these states may not necessarily be synced to the actual state of the [`Frame`]s, and
+/// these only serve as hints to the eviction algorithm.
 #[derive(Debug)]
 pub(crate) enum EvictionState {
     /// Represents a frequently / recently accessed [`Frame`](super::frame::Frame) that currently
@@ -62,9 +67,136 @@ pub(crate) enum EvictionState {
     /// Represents an infrequently or old [`Frame`](super::frame::Frame) that might be evicted soon,
     /// and also still currently holds a [`Page`](crate::page::Page)'s data.
     Cool(Arc<Page>),
-    /// Represents a [`Frame`](super::frame::Frame) that does not hold any
-    /// [`Page`](crate::page::Page)'s data.
+    /// Represents either a [`Frame`](super::frame::Frame) that does not hold any
+    /// [`Page`](crate::page::Page)'s data, or a [`Frame`] that has an active thread trying to evict
+    /// it from memory.
     Cold,
+}
+
+impl Frame {
+    /// Gets the frame group ID of the group that this frame belongs to.
+    pub(crate) fn group_id(&self) -> usize {
+        self.frame_id / FRAME_GROUP_SIZE
+    }
+
+    pub(crate) fn group(&self) -> Arc<FrameGroup> {
+        let bpm = BufferPoolManager::get();
+
+        bpm.get_frame_group(self.group_id())
+    }
+
+    pub fn get_page_owner(&self) -> Option<&Arc<Page>> {
+        self.page_owner.as_ref()
+    }
+
+    pub fn replace_page_owner(&mut self, page: Arc<Page>) -> Option<Arc<Page>> {
+        self.page_owner.replace(page)
+    }
+
+    pub fn evict_page_owner(&mut self) -> Option<Arc<Page>> {
+        self.page_owner.take()
+    }
+
+    pub async fn record_access(&self) {
+        let group = self.group();
+        let index = self.frame_id % FRAME_GROUP_SIZE;
+
+        let mut guard = group.eviction_states.lock().await;
+        match &mut guard[index] {
+            EvictionState::Hot(_) => (),
+            EvictionState::Cool(page) => guard[index] = EvictionState::Hot(page.clone()),
+            EvictionState::Cold => (),
+        }
+    }
+}
+
+impl FrameGroup {
+    pub fn new() -> Self {
+        todo!("Take in a fixed amount of frames and a group id")
+    }
+
+    /// Gets a free frame in this `FrameGroup`.
+    ///
+    /// This function will evict other frames in this `FrameGroup` if there are no free frames
+    /// available.
+    pub async fn get_free_frame(&self) -> Frame {
+        loop {
+            if let Ok(frame) = self.free_frames.1.try_recv() {
+                return frame;
+            }
+
+            self.cool_frames().await;
+        }
+    }
+
+    /// Runs the second chance / clock algorithm on all of the [`Frame`]s in this `FrameGroup`, and
+    /// then evicts all of the frames that have been cooled twice.
+    pub async fn cool_frames(&self) {
+        let mut eviction_pages: Vec<Arc<Page>> = Vec::with_capacity(FRAME_GROUP_SIZE);
+
+        let mut guard = self.eviction_states.lock().await;
+
+        for frame_temperature in guard.iter_mut() {
+            if let Some(page) = frame_temperature.cool() {
+                eviction_pages.push(page);
+            }
+        }
+
+        drop(guard);
+
+        if eviction_pages.is_empty() {
+            return;
+        }
+
+        // Attempt to evict all of the already cool frames.
+        for page in eviction_pages {
+            // If we cannot get the write guard immediately, then someone else has it and we don't
+            // need to evict this frame now.
+            if let Ok(mut guard) = page.frame.try_write() {
+                // Someone might have gotten in front of us and already evicted this page
+                if guard.is_some() {
+                    // Take ownership over the frame and remove from the Page
+                    let mut frame = guard.take().unwrap();
+                    frame
+                        .evict_page_owner()
+                        .expect("Tried to evict a frame that had no page owner");
+
+                    // Write the data out to persistent storage
+                    let (res, frame) = StorageManager::get()
+                        .create_handle()
+                        .await
+                        .expect("TODO")
+                        .write_from(page.pid, frame)
+                        .await;
+                    res.expect("TODO");
+
+                    self.free_frames.0.send(frame).await.unwrap();
+                }
+            }
+        }
+    }
+}
+
+impl EvictionState {
+    /// Runs the cooling algorithm, returning a [`PageRef`] if we want to evict the page.
+    ///
+    /// If the state is [`Hot`](FrameTemperature::Hot), then this function cools it down to be
+    /// [`Cool`](FrameTemperature::Cool), and if it was already [`Cool`](FrameTemperature::Cool),
+    /// then this function does nothing. It is on the caller to deal with eviction of the
+    /// [`Cool`](FrameTemperature::Cool) page via the [`PageRef`] that is returned.
+    ///
+    /// If the state transitions to [`Cold`](FrameTemperature::Cold), this function will return the
+    /// [`PageRef`] that it used to hold.
+    pub(crate) fn cool(&mut self) -> Option<Arc<Page>> {
+        match self {
+            Self::Hot(page) => {
+                *self = Self::Cool(page.clone());
+                None
+            }
+            Self::Cool(page) => Some(page.clone()),
+            Self::Cold => None,
+        }
+    }
 }
 
 impl Deref for Frame {

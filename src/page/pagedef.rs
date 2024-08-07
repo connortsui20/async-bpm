@@ -39,7 +39,7 @@ pub struct Page {
     /// In either case, it is protected by a read-write lock to ensure that multiple threads and
     /// tasks can access the optional frame with proper synchronization.
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    frame: RwLock<Option<Frame>>,
+    pub(crate) frame: RwLock<Option<Frame>>,
 }
 
 /// A unique identifier for a shared [`Page`].
@@ -67,11 +67,6 @@ impl PageId {
     /// A `PageId` must always be convertible into a unique 64-bit integer.
     pub fn as_u64(self) -> u64 {
         self.inner
-    }
-
-    /// Returns the index of the file that holds this page on persistent storage.
-    pub(crate) fn file_index(&self) -> usize {
-        (self.inner % StorageManager::get_num_drives() as u64) as usize
     }
 
     /// Returns the offset of this page's data on persistent storage into the file indexed by
