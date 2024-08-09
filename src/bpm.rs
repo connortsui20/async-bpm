@@ -17,12 +17,13 @@ use crate::{
     },
 };
 use rand::prelude::*;
-use std::io::Result;
 use std::{
     collections::HashMap,
     sync::{atomic::AtomicBool, Arc, OnceLock},
 };
+use std::{future::Future, io::Result};
 use tokio::sync::RwLock;
+use tokio::task;
 
 /// The global buffer pool manager instance.
 static BPM: OnceLock<BufferPoolManager> = OnceLock::new();
@@ -177,5 +178,19 @@ impl BufferPoolManager {
         };
 
         Ok(PageHandle::new(page, sm))
+    }
+
+    /// Starts a [`tokio_uring`] runtime on a single thread that runs the given [`Future`].
+    ///
+    /// TODO more docs
+    pub fn start_thread<F: Future>(future: F) -> F::Output {
+        tokio_uring::start(future)
+    }
+
+    /// Spawns a thread-local task on the current thread.
+    ///
+    /// TODO docs
+    pub fn spawn_local<T: Future + 'static>(task: T) -> task::JoinHandle<T::Output> {
+        tokio_uring::spawn(task)
     }
 }
