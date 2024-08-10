@@ -10,12 +10,13 @@
 //! attached via PCIe lanes.
 
 use crate::{page::PageId, storage::frame::Frame};
-use send_wrapper::SendWrapper;
 use std::io::Result;
 use std::{rc::Rc, sync::OnceLock};
-use thread_local::ThreadLocal;
 use tokio_uring::fs::{File, OpenOptions};
 use tokio_uring::BufResult;
+
+/// TODO remove
+pub const DATABASE_NAME: &str = "test.db";
 
 /// The global storage manager instance.
 pub(crate) static STORAGE_MANAGER: OnceLock<StorageManager> = OnceLock::new();
@@ -24,7 +25,7 @@ pub(crate) static STORAGE_MANAGER: OnceLock<StorageManager> = OnceLock::new();
 #[derive(Debug)]
 pub(crate) struct StorageManager {
     /// TODO docs
-    file: ThreadLocal<SendWrapper<Rc<File>>>,
+    file: String,
 }
 
 impl StorageManager {
@@ -35,10 +36,16 @@ impl StorageManager {
     /// Panics on I/O errors, or if this function is called a second time after a successful return.
     pub(crate) async fn initialize() {
         let sm = Self {
-            file: ThreadLocal::new(),
+            file: DATABASE_NAME.to_string(),
         };
 
-        let file = File::open("test.db").await.unwrap();
+        let _ = std::fs::remove_file(DATABASE_NAME);
+        let file = File::create(&sm.file).await.unwrap();
+        let s = "X".repeat(1 << 20);
+
+        let (res, _) = file.write_all_at(s.as_bytes().to_vec(), 0).await;
+        res.unwrap();
+
         file.close().await.unwrap();
 
         STORAGE_MANAGER
@@ -64,19 +71,13 @@ impl StorageManager {
     ///
     /// Returns an error if unable to create a [`File`] to the database files on disk.
     pub(crate) async fn create_handle(&self) -> Result<StorageManagerHandle> {
-        if let Some(file) = self.file.get() {
-            return Ok(StorageManagerHandle { file: file.clone() });
-        }
-
-        let file = SendWrapper::new(Rc::new(
+        let file = Rc::new(
             OpenOptions::new()
                 .read(true)
                 .write(true)
-                .open("test.db")
+                .open(&self.file)
                 .await?,
-        ));
-
-        let file = self.file.get_or(move || file).clone();
+        );
 
         Ok(StorageManagerHandle { file })
     }
@@ -97,7 +98,7 @@ impl StorageManager {
 #[derive(Debug, Clone)]
 pub(crate) struct StorageManagerHandle {
     /// The inner `io_uring` instance wrapped with asynchronous capabilities and methods.
-    file: SendWrapper<Rc<File>>,
+    file: Rc<File>,
 }
 
 impl StorageManagerHandle {
