@@ -182,15 +182,41 @@ impl BufferPoolManager {
 
     /// Starts a [`tokio_uring`] runtime on a single thread that runs the given [`Future`].
     ///
+    /// # Panics
+    ///
+    /// This function will panic if it is unable to spawn the eviction task for some reason.
+    ///
     /// TODO more docs
     pub fn start_thread<F: Future>(future: F) -> F::Output {
-        tokio_uring::start(future)
+        tokio_uring::start(async move {
+            Self::spawn_evictor().await.expect("Unable to spawn evictor thread");
+            future.await
+        })
     }
 
     /// Spawns a thread-local task on the current thread.
+    ///
+    /// Note that the caller must `.await` the return of this function in order to run the future.
     ///
     /// TODO docs
     pub fn spawn_local<T: Future + 'static>(task: T) -> task::JoinHandle<T::Output> {
         tokio_uring::spawn(task)
     }
+
+    /// Spawns an eviction task. TODO more docs
+    ///
+    /// # Panics
+    ///
+    /// Panics if unable to evict frames due to an I/O error.
+    pub fn spawn_evictor() -> task::JoinHandle<()> {
+        tokio_uring::spawn(async {
+            let bpm = Self::get();
+            loop {
+                let group = bpm.get_random_frame_group();
+
+                group.cool_frames().await.expect("Unable to evict frames due to I/O error")
+            }
+        })
+    }
+
 }
