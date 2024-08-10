@@ -22,7 +22,7 @@ use std::{
     sync::{atomic::AtomicBool, Arc, OnceLock},
 };
 use std::{future::Future, io::Result};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tokio::task;
 
 /// The global buffer pool manager instance.
@@ -36,7 +36,7 @@ pub struct BufferPoolManager {
     num_frames: usize,
 
     /// A mapping between unique [`PageId`]s and shared [`Page`]s.
-    pages: RwLock<HashMap<PageId, Arc<Page>>>,
+    pages: Mutex<HashMap<PageId, Arc<Page>>>,
 
     /// All of the [`FrameGroup`]s that hold the [`Frame`]s that this buffer pool manages.
     frame_groups: Vec<Arc<FrameGroup>>,
@@ -49,13 +49,14 @@ impl BufferPoolManager {
     ///
     /// This function will panic if `num_frames` is not a multiple of
     /// [`FRAME_GROUP_SIZE`]((crate::storage::frame::FRAME_GROUP_SIZE)).
-    pub fn initialize(num_frames: usize) {
+    pub fn initialize(num_frames: usize, capacity: usize) {
         assert!(
             BPM.get().is_none(),
             "Tried to initialize a BufferPoolManager more than once"
         );
         assert!(num_frames != 0);
         assert_eq!(num_frames % FRAME_GROUP_SIZE, 0);
+        assert!(num_frames < capacity);
 
         let num_groups = num_frames / FRAME_GROUP_SIZE;
 
@@ -84,13 +85,13 @@ impl BufferPoolManager {
         // Create the bpm and set it as the global static bpm instance
         BPM.set(Self {
             num_frames,
-            pages: RwLock::new(HashMap::with_capacity(num_frames)),
+            pages: Mutex::new(HashMap::with_capacity(num_frames)),
             frame_groups,
         })
         .expect("Tried to initialize the buffer pool manager more than once");
 
         // Also initialize the global `StorageManager` instance
-        StorageManager::initialize();
+        StorageManager::initialize(capacity);
     }
 
     /// Retrieve a static reference to the global buffer pool manager.
@@ -123,37 +124,6 @@ impl BufferPoolManager {
         self.get_frame_group(index)
     }
 
-    /// Creates a thread-local page handle of the buffer pool manager, returning a [`PageHandle`] to
-    /// the logical page data.
-    ///
-    /// If the page already exists, this function will return that instead.
-    ///
-    /// # Errors
-    ///
-    /// If this function is unable to create a [`File`](tokio_uring::fs::File), this function will
-    /// raise the I/O error in the form of [`Result`].
-    async fn create_page(&self, pid: &PageId) -> Result<PageHandle> {
-        let sm = StorageManager::get().create_handle().await?;
-
-        // First check if it exists already
-        let mut pages_guard = self.pages.write().await;
-        if let Some(page) = pages_guard.get(pid) {
-            return Ok(PageHandle::new(page.clone(), sm));
-        }
-
-        // Create the new page and update the global map of pages
-        let page = Arc::new(Page {
-            pid: *pid,
-            is_loaded: AtomicBool::new(false),
-            frame: RwLock::new(None),
-        });
-
-        pages_guard.insert(*pid, page.clone());
-
-        // Create the page handle and return
-        Ok(PageHandle::new(page, sm))
-    }
-
     /// Gets a thread-local page handle of the buffer pool manager, returning a [`PageHandle`] to
     /// the logical page data.
     ///
@@ -164,16 +134,23 @@ impl BufferPoolManager {
     /// If this function is unable to create a [`File`](tokio_uring::fs::File), this function will
     /// raise the I/O error in the form of [`Result`].
     pub async fn get_page(&self, pid: &PageId) -> Result<PageHandle> {
-        let sm = StorageManager::get().create_handle().await?;
+        let sm = StorageManager::get().create_handle()?;
 
-        let pages_guard = self.pages.read().await;
+        let mut pages_guard = self.pages.lock().await;
 
         // Get the page if it exists, otherwise create it and return
         let page = match pages_guard.get(pid) {
             Some(page) => page.clone(),
             None => {
-                drop(pages_guard);
-                return self.create_page(pid).await;
+                // Create the new page and update the global map of pages
+                let page = Arc::new(Page {
+                    pid: *pid,
+                    is_loaded: AtomicBool::new(false),
+                    frame: RwLock::new(None),
+                });
+
+                pages_guard.insert(*pid, page.clone());
+                page
             }
         };
 
@@ -189,8 +166,9 @@ impl BufferPoolManager {
     /// TODO more docs
     pub fn start_thread<F: Future>(future: F) -> F::Output {
         tokio_uring::start(async move {
-            Self::spawn_evictor().await.expect("Unable to spawn evictor thread");
-            future.await
+            let (res, evict) = tokio::join!(future, Self::spawn_evictor());
+            evict.expect("Unable to create eviction task");
+            res
         })
     }
 
@@ -214,9 +192,16 @@ impl BufferPoolManager {
             loop {
                 let group = bpm.get_random_frame_group();
 
-                group.cool_frames().await.expect("Unable to evict frames due to I/O error")
+                if group.num_free_frames() < FRAME_GROUP_SIZE / 4 {
+                    println!("FrameGroup is too full!!!");
+                    group
+                        .cool_frames()
+                        .await
+                        .expect("Unable to evict frames due to I/O error")
+                }
+
+                tokio::task::yield_now().await;
             }
         })
     }
-
 }

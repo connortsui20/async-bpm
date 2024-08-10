@@ -15,7 +15,7 @@ use crate::{
 };
 use async_channel::{Receiver, Sender};
 use std::io::Result;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{
     ops::{Deref, DerefMut},
     sync::Arc,
@@ -75,8 +75,11 @@ pub(crate) struct FrameGroup {
     /// asynchronous [`Mutex`].
     eviction_states: Mutex<[EvictionState; FRAME_GROUP_SIZE]>,
 
+    /// The number of free frames in the free list.
+    num_free_frames: AtomicUsize,
+
     /// An asynchronous channel of free [`Frame`]s. Behaves as the free list of frames.
-    free_frames: (Sender<Frame>, Receiver<Frame>),
+    free_list: (Sender<Frame>, Receiver<Frame>),
 }
 
 /// The enum representing the possible states that a [`Frame`] can be in with respect to the
@@ -177,7 +180,8 @@ impl FrameGroup {
 
         Self {
             eviction_states: Mutex::new(eviction_states),
-            free_frames: (rx, tx),
+            num_free_frames: AtomicUsize::new(FRAME_GROUP_SIZE),
+            free_list: (rx, tx),
         }
     }
 
@@ -191,7 +195,8 @@ impl FrameGroup {
     /// Returns an error if an I/O error occurs.
     pub async fn get_free_frame(&self) -> Result<Frame> {
         loop {
-            if let Ok(frame) = self.free_frames.1.try_recv() {
+            if let Ok(frame) = self.free_list.1.try_recv() {
+                self.num_free_frames.fetch_sub(1, Ordering::Release);
                 return Ok(frame);
             }
 
@@ -222,7 +227,7 @@ impl FrameGroup {
             return Ok(());
         }
 
-        let sm = StorageManager::get().create_handle().await?;
+        let sm = StorageManager::get().create_handle()?;
 
         // Attempt to evict all of the already cool frames.
         for page in eviction_pages {
@@ -246,11 +251,17 @@ impl FrameGroup {
                 let (res, frame) = sm.write_from(page.pid, frame).await;
                 res?;
 
-                self.free_frames.0.send(frame).await.unwrap();
+                self.free_list.0.send(frame).await.unwrap();
+                self.num_free_frames.fetch_add(1, Ordering::Release);
             }
         }
 
         Ok(())
+    }
+
+    /// Gets the number of free frames in this `FrameGroup`.
+    pub fn num_free_frames(&self) -> usize {
+        self.num_free_frames.load(Ordering::Acquire)
     }
 }
 

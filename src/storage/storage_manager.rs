@@ -9,13 +9,15 @@
 //! this buffer pool manager will operate at its best when given access to several NVMe SSDs, all
 //! attached via PCIe lanes.
 
+use crate::page::PAGE_SIZE;
 use crate::{page::PageId, storage::frame::Frame};
-use std::io::{Result, Write};
+use std::io::{Result, Seek, SeekFrom, Write};
+use std::os::unix::fs::OpenOptionsExt;
 use std::{rc::Rc, sync::OnceLock};
-use tokio_uring::fs::{File, OpenOptions};
+use tokio_uring::fs::File;
 use tokio_uring::BufResult;
 
-/// TODO remove
+/// TODO refactor this
 pub const DATABASE_NAME: &str = "test.db";
 
 /// The global storage manager instance.
@@ -24,7 +26,7 @@ pub(crate) static STORAGE_MANAGER: OnceLock<StorageManager> = OnceLock::new();
 /// Manages reads into and writes from `Frame`s between memory and persistent storage.
 #[derive(Debug)]
 pub(crate) struct StorageManager {
-    /// TODO docs
+    /// TODO does this even make sense
     file: String,
 }
 
@@ -34,16 +36,16 @@ impl StorageManager {
     /// # Panics
     ///
     /// Panics on I/O errors, or if this function is called a second time after a successful return.
-    pub(crate) fn initialize() {
+    pub(crate) fn initialize(capacity: usize) {
         let sm = Self {
             file: DATABASE_NAME.to_string(),
         };
 
         let _ = std::fs::remove_file(DATABASE_NAME);
         let mut file = std::fs::File::create(&sm.file).unwrap();
-        let s = "X".repeat(1 << 20);
-
-        file.write_all(s.as_bytes()).unwrap();
+        file.seek(SeekFrom::Start((capacity * PAGE_SIZE) as u64))
+            .unwrap();
+        file.write_all(&[0]).unwrap();
 
         STORAGE_MANAGER
             .set(sm)
@@ -67,14 +69,14 @@ impl StorageManager {
     /// # Errors
     ///
     /// Returns an error if unable to create a [`File`] to the database files on disk.
-    pub(crate) async fn create_handle(&self) -> Result<StorageManagerHandle> {
-        let file = Rc::new(
-            OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(&self.file)
-                .await?,
-        );
+    pub(crate) fn create_handle(&self) -> Result<StorageManagerHandle> {
+        let std_file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(libc::O_DIRECT)
+            .open(&self.file)?;
+
+        let file = Rc::new(File::from_std(std_file));
 
         Ok(StorageManagerHandle { file })
     }
@@ -91,10 +93,10 @@ impl StorageManager {
 
 /// A thread-local handle to a [`StorageManager`].
 ///
-/// TODO this might not be named appropriately
+/// TODO this might not be named appropriately anymore
 #[derive(Debug, Clone)]
 pub(crate) struct StorageManagerHandle {
-    /// The inner `io_uring` instance wrapped with asynchronous capabilities and methods.
+    /// TODO does this even make sense
     file: Rc<File>,
 }
 
