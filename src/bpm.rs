@@ -49,7 +49,7 @@ impl BufferPoolManager {
     ///
     /// This function will panic if `num_frames` is not a multiple of
     /// [`FRAME_GROUP_SIZE`]((crate::storage::frame::FRAME_GROUP_SIZE)).
-    pub async fn initialize(num_frames: usize) {
+    pub fn initialize(num_frames: usize) {
         assert!(
             BPM.get().is_none(),
             "Tried to initialize a BufferPoolManager more than once"
@@ -78,7 +78,7 @@ impl BufferPoolManager {
             let group: Vec<Frame> = (0..FRAME_GROUP_SIZE)
                 .map(|_| frames.pop().expect("Somehow ran out of frames"))
                 .collect();
-            frame_groups.push(Arc::new(FrameGroup::new(group).await));
+            frame_groups.push(Arc::new(FrameGroup::new(group)));
         }
 
         // Create the bpm and set it as the global static bpm instance
@@ -90,7 +90,7 @@ impl BufferPoolManager {
         .expect("Tried to initialize the buffer pool manager more than once");
 
         // Also initialize the global `StorageManager` instance
-        StorageManager::initialize().await;
+        StorageManager::initialize();
     }
 
     /// Retrieve a static reference to the global buffer pool manager.

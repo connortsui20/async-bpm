@@ -10,7 +10,7 @@
 //! attached via PCIe lanes.
 
 use crate::{page::PageId, storage::frame::Frame};
-use std::io::Result;
+use std::io::{Result, Write};
 use std::{rc::Rc, sync::OnceLock};
 use tokio_uring::fs::{File, OpenOptions};
 use tokio_uring::BufResult;
@@ -34,19 +34,16 @@ impl StorageManager {
     /// # Panics
     ///
     /// Panics on I/O errors, or if this function is called a second time after a successful return.
-    pub(crate) async fn initialize() {
+    pub(crate) fn initialize() {
         let sm = Self {
             file: DATABASE_NAME.to_string(),
         };
 
         let _ = std::fs::remove_file(DATABASE_NAME);
-        let file = File::create(&sm.file).await.unwrap();
+        let mut file = std::fs::File::create(&sm.file).unwrap();
         let s = "X".repeat(1 << 20);
 
-        let (res, _) = file.write_all_at(s.as_bytes().to_vec(), 0).await;
-        res.unwrap();
-
-        file.close().await.unwrap();
+        file.write_all(s.as_bytes()).unwrap();
 
         STORAGE_MANAGER
             .set(sm)

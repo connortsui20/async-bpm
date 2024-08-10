@@ -160,7 +160,7 @@ impl FrameGroup {
     ///
     /// This function will panic if the iterator does not contain exactly [`FRAME_GROUP_SIZE`]
     /// frames.
-    pub async fn new<I>(frames: I) -> Self
+    pub fn new<I>(frames: I) -> Self
     where
         I: IntoIterator<Item = Frame>,
     {
@@ -168,7 +168,7 @@ impl FrameGroup {
 
         let mut counter = 0;
         for frame in frames {
-            rx.send(frame).await.expect("Channel cannot be closed");
+            rx.send_blocking(frame).expect("Channel cannot be closed");
             counter += 1;
         }
         assert_eq!(counter, FRAME_GROUP_SIZE);
