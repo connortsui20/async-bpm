@@ -16,5 +16,9 @@ tokio-uring = "0.5"
 [dev-dependencies]
 tokio = { version = "1.37", features = ["full"] }
 
+[profile.dev]
+panic = "abort"
+
 [profile.release]
+panic = "abort"
 debug = true
