@@ -24,7 +24,7 @@ use std::{
 use tokio_uring::buf::{IoBuf, IoBufMut};
 
 /// The number of frames in a [`FrameGroup`].
-pub const FRAME_GROUP_SIZE: usize = 64;
+pub(crate) const FRAME_GROUP_SIZE: usize = 64;
 
 /// An owned buffer frame, intended to be shared between user and kernel space.
 #[derive(Debug)]

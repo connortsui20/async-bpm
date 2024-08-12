@@ -8,6 +8,8 @@
 //! the use of any global latches or single points of contention for the entire system. This means
 //! that several parts of the system are implemented quite differently from how a traditional buffer
 //! pool manager would work.
+//!
+//! TODO more docs.
 
 use crate::{
     page::{Page, PageHandle, PageId, PAGE_SIZE},
@@ -45,27 +47,34 @@ pub struct BufferPoolManager {
 impl BufferPoolManager {
     /// Constructs a new buffer pool manager with the given number of [`PAGE_SIZE`]ed buffer frames.
     ///
+    /// Note that this function may round `num_frames` down to a multiple of `FRAME_GROUP_SIZE`,
+    /// which is an internal constant that groups memory frames together. Expect this constant to be
+    /// set to 64 frames, but _do not_ rely on this fact.
+    ///
     /// # Panics
     ///
-    /// This function will panic if `num_frames` is not a multiple of
-    /// [`FRAME_GROUP_SIZE`]((crate::storage::frame::FRAME_GROUP_SIZE)).
+    /// This function will panic if `num_frames` is equal to zero, if `capacity` is greater than
+    /// or equal to `num_frames`, or if the caller has already called `initialize` before.
     pub fn initialize(num_frames: usize, capacity: usize) {
         assert!(
             BPM.get().is_none(),
             "Tried to initialize a BufferPoolManager more than once"
         );
+
+        // Round down to the nearest multiple of `FRAME_GROUP_SIZE`.
+        let num_frames = num_frames - (num_frames % FRAME_GROUP_SIZE);
+
         assert!(num_frames != 0);
-        assert_eq!(num_frames % FRAME_GROUP_SIZE, 0);
         assert!(num_frames < capacity);
 
         let num_groups = num_frames / FRAME_GROUP_SIZE;
 
-        // Allocate all of the buffer memory up front and initialize to 0.
+        // Allocate all of the buffer memory up front and initialize to 0s.
         let bytes: &'static mut [u8] = vec![0u8; num_frames * PAGE_SIZE].leak();
 
         // Divide the memory up into `PAGE_SIZE` chunks.
         let buffers: Vec<&'static mut [u8]> = bytes.chunks_exact_mut(PAGE_SIZE).collect();
-        assert_eq!(buffers.len(), num_frames);
+        debug_assert_eq!(buffers.len(), num_frames);
 
         let mut frames: Vec<Frame> = buffers
             .into_iter()
@@ -82,7 +91,7 @@ impl BufferPoolManager {
             frame_groups.push(Arc::new(FrameGroup::new(id, group)));
         }
 
-        // Create the bpm and set it as the global static bpm instance
+        // Create the buffer pool and set it as the global static instance.
         BPM.set(Self {
             num_frames,
             pages: Mutex::new(HashMap::with_capacity(num_frames)),
@@ -90,7 +99,7 @@ impl BufferPoolManager {
         })
         .expect("Tried to initialize the buffer pool manager more than once");
 
-        // Also initialize the global `StorageManager` instance
+        // Also initialize the global `StorageManager` instance.
         StorageManager::initialize(capacity);
     }
 
@@ -98,7 +107,8 @@ impl BufferPoolManager {
     ///
     /// # Panics
     ///
-    /// This function will panic if it is called before a call to [`BufferPoolManager::initialize`].
+    /// This function will panic if it is called before [`BufferPoolManager::initialize`] has been
+    /// called.
     pub fn get() -> &'static Self {
         BPM.get()
             .expect("Tried to get a reference to the BPM before it was initialized")
@@ -107,21 +117,6 @@ impl BufferPoolManager {
     /// Gets the number of fixed frames the buffer pool manages.
     pub fn num_frames(&self) -> usize {
         self.num_frames
-    }
-
-    /// Gets an `Arc` to a [`FrameGroup`] given the frame group ID.
-    pub(crate) fn get_frame_group(&self, group_id: usize) -> Arc<FrameGroup> {
-        self.frame_groups[group_id].clone()
-    }
-
-    /// Gets an `Arc` to a random [`FrameGroup`] in the buffer pool manager.
-    ///
-    /// Intended for use by an eviction algorithm.
-    pub(crate) fn get_random_frame_group(&self) -> Arc<FrameGroup> {
-        let mut rng = rand::thread_rng();
-        let index = rng.gen_range(0..self.frame_groups.len());
-
-        self.get_frame_group(index)
     }
 
     /// Gets a thread-local page handle of the buffer pool manager, returning a [`PageHandle`] to
@@ -157,13 +152,28 @@ impl BufferPoolManager {
         Ok(PageHandle::new(page, sm))
     }
 
+    /// Gets an [`Arc`] to a [`FrameGroup`] given the frame group ID.
+    pub(crate) fn get_frame_group(&self, group_id: usize) -> Arc<FrameGroup> {
+        self.frame_groups[group_id].clone()
+    }
+
+    /// Gets an [`Arc`] to a random [`FrameGroup`] in the buffer pool manager.
+    ///
+    /// Intended for use by an eviction algorithm.
+    pub(crate) fn get_random_frame_group(&self) -> Arc<FrameGroup> {
+        let mut rng = rand::thread_rng();
+        let index = rng.gen_range(0..self.frame_groups.len());
+
+        self.get_frame_group(index)
+    }
+
     /// Starts a [`tokio_uring`] runtime on a single thread that runs the given [`Future`].
+    ///
+    /// TODO more docs
     ///
     /// # Panics
     ///
     /// This function will panic if it is unable to spawn the eviction task for some reason.
-    ///
-    /// TODO more docs
     pub fn start_thread<F: Future>(future: F) -> F::Output {
         tokio_uring::start(async move {
             tokio::select! {
@@ -183,7 +193,9 @@ impl BufferPoolManager {
         tokio_uring::spawn(task)
     }
 
-    /// Spawns an eviction task. TODO more docs
+    /// Spawns an eviction task.
+    ///
+    /// TODO more docs
     ///
     /// # Panics
     ///

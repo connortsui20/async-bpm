@@ -3,5 +3,3 @@
 
 pub(crate) mod frame;
 pub(crate) mod storage_manager;
-
-pub use frame::FRAME_GROUP_SIZE;
