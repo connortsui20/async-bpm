@@ -16,11 +16,11 @@ use crate::{
 use async_channel::{Receiver, Sender};
 use std::io::Result;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 use std::{
     ops::{Deref, DerefMut},
     sync::Arc,
 };
-use tokio::sync::Mutex;
 use tokio_uring::buf::{IoBuf, IoBufMut};
 
 /// The number of frames in a [`FrameGroup`].
@@ -69,10 +69,14 @@ pub(crate) struct Frame {
 /// [`Cold`]: EvictionState::Cold
 #[derive(Debug)]
 pub(crate) struct FrameGroup {
+    /// The unique ID of this `FrameGroup`.
+    #[allow(dead_code)]
+    group_id: usize,
+
     /// The states of the [`Frame`]s that belong to this `FrameGroup`.
     ///
-    /// Only 1 thread is allowed to modify eviction states at any time, thus we protect them with an
-    /// asynchronous [`Mutex`].
+    /// Note that we use a blocking mutex here because we do not need to hold the lock across any
+    /// `.await` points.
     eviction_states: Mutex<[EvictionState; FRAME_GROUP_SIZE]>,
 
     /// The number of free frames in the free list.
@@ -124,11 +128,6 @@ impl Frame {
         bpm.get_frame_group(self.group_id())
     }
 
-    /// Gets a pointer to the [`Page`] that owns this `Frame`, if this `Frame` is owned by any.
-    pub(crate) fn get_page_owner(&self) -> Option<&Arc<Page>> {
-        self.page_owner.as_ref()
-    }
-
     /// Replaces the owning [`Page`] of this `Frame` with another [`Page`].
     pub(crate) fn replace_page_owner(&mut self, page: Arc<Page>) -> Option<Arc<Page>> {
         self.page_owner.replace(page)
@@ -143,16 +142,16 @@ impl Frame {
     ///
     /// This function will simply update the [`EvictionState`] of the `Frame` to
     /// [`Hot`](EvictionState::Hot).
-    pub(crate) async fn record_access(&self) {
+    pub(crate) fn record_access(&self, page: Arc<Page>) {
         let group = self.group();
         let index = self.frame_id % FRAME_GROUP_SIZE;
 
-        let mut guard = group.eviction_states.lock().await;
-        match &mut guard[index] {
-            EvictionState::Hot(_) => (),
-            EvictionState::Cool(page) => guard[index] = EvictionState::Hot(page.clone()),
-            EvictionState::Cold => (),
-        }
+        let mut eviction_guard = group
+            .eviction_states
+            .lock()
+            .expect("EvictionState lock was poisoned somehow");
+
+        eviction_guard[index] = EvictionState::Hot(page.clone());
     }
 }
 
@@ -163,7 +162,7 @@ impl FrameGroup {
     ///
     /// This function will panic if the iterator does not contain exactly [`FRAME_GROUP_SIZE`]
     /// frames.
-    pub fn new<I>(frames: I) -> Self
+    pub(crate) fn new<I>(group_id: usize, frames: I) -> Self
     where
         I: IntoIterator<Item = Frame>,
     {
@@ -179,6 +178,7 @@ impl FrameGroup {
         let eviction_states = core::array::from_fn(|_| EvictionState::default());
 
         Self {
+            group_id,
             eviction_states: Mutex::new(eviction_states),
             num_free_frames: AtomicUsize::new(FRAME_GROUP_SIZE),
             free_list: (rx, tx),
@@ -193,7 +193,7 @@ impl FrameGroup {
     /// # Errors
     ///
     /// Returns an error if an I/O error occurs.
-    pub async fn get_free_frame(&self) -> Result<Frame> {
+    pub(crate) async fn get_free_frame(&self) -> Result<Frame> {
         loop {
             if let Ok(frame) = self.free_list.1.try_recv() {
                 self.num_free_frames.fetch_sub(1, Ordering::Release);
@@ -210,11 +210,15 @@ impl FrameGroup {
     /// # Errors
     ///
     /// Returns an error if an I/O error occurs.
-    pub async fn cool_frames(&self) -> Result<()> {
+    pub(crate) async fn cool_frames(&self) -> Result<()> {
         let mut eviction_pages: Vec<Arc<Page>> = Vec::with_capacity(FRAME_GROUP_SIZE);
 
+        // Find page eviction candidates.
         {
-            let mut evicton_guard = self.eviction_states.lock().await;
+            let mut evicton_guard = self
+                .eviction_states
+                .lock()
+                .expect("EvictionState lock was poisoned somehow");
 
             for frame_temperature in evicton_guard.iter_mut() {
                 if let Some(page) = frame_temperature.cool() {
@@ -260,7 +264,7 @@ impl FrameGroup {
     }
 
     /// Gets the number of free frames in this `FrameGroup`.
-    pub fn num_free_frames(&self) -> usize {
+    pub(crate) fn num_free_frames(&self) -> usize {
         self.num_free_frames.load(Ordering::Acquire)
     }
 }
