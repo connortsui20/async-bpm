@@ -1,6 +1,6 @@
 //! Wrappers around `tokio`'s `RwLockReadGuard` and `RwLockWriteGuard`, dedicated for pages of data.
 
-use super::PageId;
+use crate::page::PageId;
 use crate::storage::{frame::Frame, storage_manager::StorageManager};
 use std::io::Result;
 use std::ops::{Deref, DerefMut};
@@ -15,11 +15,12 @@ use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
 pub struct ReadPageGuard<'a> {
     /// The `RwLock` read guard of the optional frame, that _must_ be the [`Some`] variant.
     ///
-    /// The only reason that this guard protects an `Option<Frame>` instead of a `Frame` is because
-    /// the [`Page`](super::Page) type may have the `None` variant. However, _we_ guarantee through
-    /// panics that a `ReadPageGuard` can only be constructed while the [`Page`](super::Page) has
-    /// ownership over a `Frame`, and thus can make the assumption that this is _always_ the `Some`
-    /// variant that holds an owned frame.
+    /// The only reason that this guard protects an `Option<Frame>` instead of just a [`Frame`] is
+    /// because the [`Page`](super::Page) type may have the `None` variant.
+    ///
+    /// However, we guarantee through invariants that a `ReadPageGuard` can only be constructed
+    /// while the [`Page`](super::Page) has ownership over a [`Frame`], and thus we can make the
+    /// assumption that this is _always_ the `Some` variant that holds an owned frame.
     guard: RwLockReadGuard<'a, Option<Frame>>,
 }
 
@@ -64,11 +65,12 @@ pub struct WritePageGuard<'a> {
 
     /// The `RwLock` write guard of the optional frame, that _must_ be the [`Some`] variant.
     ///
-    /// The only reason that this guard protects an `Option<Frame>` instead of a `Frame` is because
-    /// the [`Page`](super::Page) type may have the `None` variant. However, _we_ guarantee through
-    /// panics that a `WritePageGuard` can only be constructed while the [`Page`](super::Page) has
-    /// ownership over a `Frame`, and thus can make the assumption that this is _always_ the `Some`
-    /// variant that holds an owned frame.
+    /// The only reason that this guard protects an `Option<Frame>` instead of just a [`Frame`] is
+    /// because the [`Page`](super::Page) type may have the `None` variant.
+    ///
+    /// However, we guarantee through invariants that a `WritePageGuard` can only be constructed
+    /// while the [`Page`](super::Page) has ownership over a [`Frame`], and thus we can make the
+    /// assumption that this is _always_ the `Some` variant that holds an owned frame.
     guard: RwLockWriteGuard<'a, Option<Frame>>,
 }
 
@@ -92,18 +94,19 @@ impl<'a> WritePageGuard<'a> {
     ///
     /// # Errors
     ///
-    /// This function will return an error if it is unable to complete the write operation to a file.
+    /// This function will return an error if it is unable to complete the write operation to a
+    /// file.
     #[allow(clippy::missing_panics_doc)]
     pub async fn flush(&mut self) -> Result<()> {
         debug_assert!(self.guard.is_some());
 
-        // Temporarily take ownership of the frame from the guard
+        // Temporarily take ownership of the frame from the guard.
         let frame = self
             .guard
             .take()
             .expect("WritePageGuard somehow had no Frame");
 
-        // Write the data out to persistent storage
+        // Write the data out to persistent storage.
         let (res, frame) = StorageManager::get()
             .create_handle()
             .await?
@@ -111,7 +114,7 @@ impl<'a> WritePageGuard<'a> {
             .await;
         res?;
 
-        // Give ownership back to the guard
+        // Give ownership back to the guard.
         self.guard.replace(frame);
 
         Ok(())
