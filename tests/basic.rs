@@ -2,12 +2,30 @@ use async_bpm::{bpm::BufferPoolManager, page::PageId};
 use std::ops::DerefMut;
 use std::thread;
 
-const THREADS: usize = 8;
+#[test]
+#[ignore]
+fn test_single_thread() {
+    BufferPoolManager::initialize(64, 128);
+    let bpm = BufferPoolManager::get();
+
+    BufferPoolManager::start_thread(async move {
+        let pid = PageId::new(0);
+        let ph = bpm.get_page(&pid).await.unwrap();
+
+        {
+            let mut guard = ph.write().await;
+            guard.deref_mut().fill(b'A');
+            guard.flush().await.unwrap();
+        }
+    });
+}
 
 #[test]
 #[ignore]
 fn test_basic() {
-    BufferPoolManager::initialize(64, 128);
+    const THREADS: usize = 95;
+
+    BufferPoolManager::initialize(64, 256);
     let bpm = BufferPoolManager::get();
 
     // Spawn all threads
