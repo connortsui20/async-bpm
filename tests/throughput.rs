@@ -62,7 +62,7 @@ fn throughput() {
                                     std::hint::black_box(slice);
                                 }
 
-                                COUNTER.fetch_add(1, Ordering::SeqCst);
+                                COUNTER.fetch_add(1, Ordering::Release);
                             }
                         });
 
@@ -79,10 +79,15 @@ fn throughput() {
         }
 
         s.spawn(move || {
-            let duration = std::time::Duration::from_secs(1);
-            while COUNTER.load(Ordering::SeqCst) < THREADS * TASKS * ITERATIONS {
-                println!("Counter is at: {:?}", COUNTER);
-                std::thread::sleep(duration);
+            let second = std::time::Duration::from_secs(1);
+            let mut counter = 0;
+
+            while counter < THREADS * TASKS * ITERATIONS {
+                let prev = counter;
+                counter = COUNTER.load(Ordering::Acquire);
+
+                println!("Operations per second: {}", counter - prev);
+                std::thread::sleep(second);
             }
 
             let end = std::time::Instant::now();
