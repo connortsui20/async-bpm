@@ -75,11 +75,11 @@ impl BufferPoolManager {
 
         let mut frame_groups: Vec<Arc<FrameGroup>> = Vec::with_capacity(num_groups);
 
-        for _ in 0..num_groups {
+        for id in 0..num_groups {
             let group: Vec<Frame> = (0..FRAME_GROUP_SIZE)
                 .map(|_| frames.pop().expect("Somehow ran out of frames"))
                 .collect();
-            frame_groups.push(Arc::new(FrameGroup::new(group)));
+            frame_groups.push(Arc::new(FrameGroup::new(id, group)));
         }
 
         // Create the bpm and set it as the global static bpm instance
@@ -168,6 +168,7 @@ impl BufferPoolManager {
         tokio_uring::start(async move {
             tokio::select! {
                 output = future => output,
+                // TODO figure out why including this is this slower
                 _ = Self::spawn_evictor() => unreachable!("The eviction task should never return")
             }
         })
@@ -194,15 +195,15 @@ impl BufferPoolManager {
                 tokio::task::yield_now().await;
 
                 let group = bpm.get_random_frame_group();
-                if group.num_free_frames() < FRAME_GROUP_SIZE / 4 {
-                    println!("Evicting frames automatically");
+                if group.num_free_frames() < FRAME_GROUP_SIZE / 10 {
                     group
                         .cool_frames()
                         .await
                         .expect("Unable to evict frames due to I/O error");
                 }
 
-                // Sleep for 100 ms once we have nothing to do.
+                // Sleep once we have nothing to do.
+                // TODO removing this should not cause the system to halt.
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             }
         })

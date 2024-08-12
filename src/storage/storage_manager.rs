@@ -11,12 +11,15 @@
 
 use crate::page::PAGE_SIZE;
 use crate::{page::PageId, storage::frame::Frame};
+use send_wrapper::SendWrapper;
 use std::io::Result;
+use std::ops::Deref;
 use std::{rc::Rc, sync::OnceLock};
+use thread_local::ThreadLocal;
 use tokio_uring::fs::{File, OpenOptions};
 use tokio_uring::BufResult;
 
-/// TODO refactor this
+/// TODO refactor this out
 pub const DATABASE_NAME: &str = "test.db";
 
 /// The global storage manager instance.
@@ -26,7 +29,7 @@ pub(crate) static STORAGE_MANAGER: OnceLock<StorageManager> = OnceLock::new();
 #[derive(Debug)]
 pub(crate) struct StorageManager {
     /// TODO does this even make sense
-    file: String,
+    file: ThreadLocal<SendWrapper<Rc<File>>>,
 }
 
 impl StorageManager {
@@ -49,7 +52,7 @@ impl StorageManager {
         .expect("I/O error on initialization");
 
         let sm = Self {
-            file: DATABASE_NAME.to_string(),
+            file: ThreadLocal::new(),
         };
 
         STORAGE_MANAGER
@@ -75,12 +78,20 @@ impl StorageManager {
     ///
     /// Returns an error if unable to create a [`File`] to the database files on disk.
     pub(crate) async fn create_handle(&self) -> Result<StorageManagerHandle> {
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&self.file)
-            .await?;
-        let file = Rc::new(file);
+        let file = match self.file.get() {
+            Some(file) => file.deref().clone(),
+            None => {
+                let file = OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(DATABASE_NAME)
+                    .await?;
+
+                let file = SendWrapper::new(Rc::new(file));
+
+                self.file.get_or(move || file).deref().clone()
+            }
+        };
 
         Ok(StorageManagerHandle { file })
     }
