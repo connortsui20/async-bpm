@@ -227,6 +227,7 @@ impl FrameGroup {
             }
         }
 
+        // If there are no page eviction candidates, then there is nothing we can do.
         if eviction_pages.is_empty() {
             return Ok(());
         }
