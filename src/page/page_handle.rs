@@ -1,4 +1,6 @@
 //! Implementation of the `PageHandle` type.
+//!
+//! TODO more docs
 
 use crate::bpm::BufferPoolManager;
 use crate::page::page_guard::{ReadPageGuard, WritePageGuard};
@@ -33,7 +35,7 @@ impl PageHandle {
 
     /// Gets a read guard on a logical page, which guarantees the data is in memory.
     pub async fn read(&self) -> ReadPageGuard {
-        // Fast path: attempt to read if we observe that the `is_loaded` flag is set.
+        // Optimization: attempt to read only if we observe that the `is_loaded` flag is set.
         if self.page.is_loaded.load(Ordering::Acquire) {
             let read_guard = self.page.frame.read().await;
 
@@ -56,10 +58,12 @@ impl PageHandle {
         ReadPageGuard::new(self.page.pid, write_guard.downgrade())
     }
 
-    /// Attempts to grab the read lock. If unsuccessful, this function does nothing. Otherwise, this
-    /// function behaves identically to [`PageHandle::read`].
+    /// Attempts to optimistically get a read guard _without_ blocking.
+    ///
+    /// If unsuccessful, this function does nothing and returns `None`. Otherwise, this function
+    /// behaves identically to [`PageHandle::read`].
     pub async fn try_read(&self) -> Option<ReadPageGuard> {
-        // Fast path: attempt to read if we observe that the `is_loaded` flag is set.
+        // Optimization: attempt to read only if we observe that the `is_loaded` flag is set.
         if self.page.is_loaded.load(Ordering::Acquire) {
             let Ok(read_guard) = self.page.frame.try_read() else {
                 return None;
@@ -101,8 +105,10 @@ impl PageHandle {
         WritePageGuard::new(self.page.pid, write_guard)
     }
 
-    /// Attempts to grab the write lock. If unsuccessful, this function does nothing. Otherwise,
-    /// this function behaves identically to [`PageHandle::write`].
+    /// Attempts to optimistically get a write guard _without_ blocking.
+    ///
+    /// If unsuccessful, this function does nothing and returns `None`. Otherwise, this function
+    /// behaves identically to [`PageHandle::write`].
     pub async fn try_write(&self) -> Option<WritePageGuard> {
         let Ok(mut write_guard) = self.page.frame.try_write() else {
             return None;
@@ -134,7 +140,7 @@ impl PageHandle {
         let bpm = BufferPoolManager::get();
         let frame_group = bpm.get_random_frame_group();
 
-        // Wait for a free frame
+        // Wait for a free frame.
         let mut frame = frame_group
             .get_free_frame()
             .await
