@@ -134,7 +134,7 @@ impl BufferPoolManager {
     /// If this function is unable to create a [`File`](tokio_uring::fs::File), this function will
     /// raise the I/O error in the form of [`Result`].
     pub async fn get_page(&self, pid: &PageId) -> Result<PageHandle> {
-        let sm = StorageManager::get().create_handle()?;
+        let sm = StorageManager::get().create_handle().await?;
 
         let mut pages_guard = self.pages.lock().await;
 
@@ -166,9 +166,10 @@ impl BufferPoolManager {
     /// TODO more docs
     pub fn start_thread<F: Future>(future: F) -> F::Output {
         tokio_uring::start(async move {
-            let (res, evict) = tokio::join!(future, Self::spawn_evictor());
-            evict.expect("Unable to create eviction task");
-            res
+            tokio::select! {
+                output = future => output,
+                _ = Self::spawn_evictor() => unreachable!("The eviction task should never return")
+            }
         })
     }
 
@@ -190,17 +191,19 @@ impl BufferPoolManager {
         tokio_uring::spawn(async {
             let bpm = Self::get();
             loop {
-                let group = bpm.get_random_frame_group();
+                tokio::task::yield_now().await;
 
+                let group = bpm.get_random_frame_group();
                 if group.num_free_frames() < FRAME_GROUP_SIZE / 4 {
-                    println!("FrameGroup is too full!!!");
+                    println!("Evicting frames automatically");
                     group
                         .cool_frames()
                         .await
-                        .expect("Unable to evict frames due to I/O error")
+                        .expect("Unable to evict frames due to I/O error");
                 }
 
-                tokio::task::yield_now().await;
+                // Sleep for 100 ms once we have nothing to do.
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             }
         })
     }
