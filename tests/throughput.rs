@@ -18,9 +18,9 @@ const GIGABYTE_PAGES: usize = GIGABYTE / PAGE_SIZE;
 
 #[test]
 fn throughput() {
-    const THREADS: usize = 8;
-    const TASKS: usize = 32; // tasks per thread
-    const OPERATIONS: usize = 1 << 20;
+    const THREADS: usize = 4;
+    const TASKS: usize = 64; // tasks per thread
+    const OPERATIONS: usize = 1 << 22;
 
     const THREAD_OPERATIONS: usize = OPERATIONS / THREADS;
     const ITERATIONS: usize = THREAD_OPERATIONS / TASKS; // iterations per task
@@ -34,6 +34,8 @@ fn throughput() {
     let coin = Bernoulli::new(20.0 / 100.0).unwrap();
 
     println!("Operations: {OPERATIONS}");
+
+    let start = std::time::Instant::now();
 
     // Spawn all threads
     thread::scope(|s| {
@@ -76,12 +78,16 @@ fn throughput() {
             });
         }
 
-        s.spawn(|| {
+        s.spawn(move || {
             let duration = std::time::Duration::from_secs(1);
             while COUNTER.load(Ordering::SeqCst) < THREADS * TASKS * ITERATIONS {
                 println!("Counter is at: {:?}", COUNTER);
                 std::thread::sleep(duration);
             }
+
+            let end = std::time::Instant::now();
+            let elapsed = end - start;
+            println!("Time elapsed: {:?}", elapsed);
 
             std::process::exit(0);
         });
