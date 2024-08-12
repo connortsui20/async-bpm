@@ -11,10 +11,9 @@
 
 use crate::page::PAGE_SIZE;
 use crate::{page::PageId, storage::frame::Frame};
-use std::io::{Result, Seek, SeekFrom, Write};
-use std::os::unix::fs::OpenOptionsExt;
+use std::io::Result;
 use std::{rc::Rc, sync::OnceLock};
-use tokio_uring::fs::File;
+use tokio_uring::fs::{File, OpenOptions};
 use tokio_uring::BufResult;
 
 /// TODO refactor this
@@ -37,15 +36,21 @@ impl StorageManager {
     ///
     /// Panics on I/O errors, or if this function is called a second time after a successful return.
     pub(crate) fn initialize(capacity: usize) {
+        tokio_uring::start(async {
+            let _ = tokio_uring::fs::remove_file(DATABASE_NAME).await;
+
+            let file = File::create(DATABASE_NAME).await?;
+            file.fallocate(0, (capacity * PAGE_SIZE) as u64, libc::FALLOC_FL_ZERO_RANGE)
+                .await?;
+
+            file.close().await?;
+            Ok::<(), std::io::Error>(())
+        })
+        .expect("I/O error on initialization");
+
         let sm = Self {
             file: DATABASE_NAME.to_string(),
         };
-
-        let _ = std::fs::remove_file(DATABASE_NAME);
-        let mut file = std::fs::File::create(&sm.file).unwrap();
-        file.seek(SeekFrom::Start((capacity * PAGE_SIZE) as u64))
-            .unwrap();
-        file.write_all(&[0]).unwrap();
 
         STORAGE_MANAGER
             .set(sm)
@@ -69,14 +74,13 @@ impl StorageManager {
     /// # Errors
     ///
     /// Returns an error if unable to create a [`File`] to the database files on disk.
-    pub(crate) fn create_handle(&self) -> Result<StorageManagerHandle> {
-        let std_file = std::fs::OpenOptions::new()
+    pub(crate) async fn create_handle(&self) -> Result<StorageManagerHandle> {
+        let file = OpenOptions::new()
             .read(true)
             .write(true)
-            .custom_flags(libc::O_DIRECT)
-            .open(&self.file)?;
-
-        let file = Rc::new(File::from_std(std_file));
+            .open(&self.file)
+            .await?;
+        let file = Rc::new(file);
 
         Ok(StorageManagerHandle { file })
     }

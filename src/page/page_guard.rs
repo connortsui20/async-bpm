@@ -105,7 +105,8 @@ impl<'a> WritePageGuard<'a> {
 
         // Write the data out to persistent storage
         let (res, frame) = StorageManager::get()
-            .create_handle()?
+            .create_handle()
+            .await?
             .write_from(self.pid, frame)
             .await;
         res?;
