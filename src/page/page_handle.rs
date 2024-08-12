@@ -40,7 +40,7 @@ impl PageHandle {
             // If it is already loaded, then we're done.
             if let Some(frame) = read_guard.deref() {
                 self.page.is_loaded.store(true, Ordering::Release);
-                frame.record_access().await;
+                frame.record_access(self.page.clone());
                 return ReadPageGuard::new(self.page.pid, read_guard);
             }
 
@@ -68,7 +68,7 @@ impl PageHandle {
             // If it is already loaded, then we're done.
             if let Some(frame) = read_guard.deref() {
                 self.page.is_loaded.store(true, Ordering::Release);
-                frame.record_access().await;
+                frame.record_access(self.page.clone());
                 return Some(ReadPageGuard::new(self.page.pid, read_guard));
             }
 
@@ -91,7 +91,7 @@ impl PageHandle {
         // If it is already loaded, then we're done.
         if let Some(frame) = write_guard.deref() {
             self.page.is_loaded.store(true, Ordering::Release);
-            frame.record_access().await;
+            frame.record_access(self.page.clone());
             return WritePageGuard::new(self.page.pid, write_guard);
         }
 
@@ -111,7 +111,7 @@ impl PageHandle {
         // If it is already loaded, then we're done.
         if let Some(frame) = write_guard.deref() {
             self.page.is_loaded.store(true, Ordering::Release);
-            frame.record_access().await;
+            frame.record_access(self.page.clone());
             return Some(WritePageGuard::new(self.page.pid, write_guard));
         }
 
@@ -126,7 +126,7 @@ impl PageHandle {
         // If someone else got in front of us and loaded the page for us.
         if let Some(frame) = guard.deref().deref() {
             self.page.is_loaded.store(true, Ordering::Release);
-            frame.record_access().await;
+            frame.record_access(self.page.clone());
             return;
         }
 
@@ -146,10 +146,11 @@ impl PageHandle {
         let (res, frame) = self.sm.read_into(self.page.pid, frame).await;
         res.expect("TODO Have to figure out if this is a recoverable error");
 
+        self.page.is_loaded.store(true, Ordering::Release);
+        frame.record_access(self.page.clone());
+
         // Give ownership of the frame to the actual page.
         let old: Option<Frame> = guard.replace(frame);
         assert!(old.is_none());
-
-        self.page.is_loaded.store(true, Ordering::Release);
     }
 }
