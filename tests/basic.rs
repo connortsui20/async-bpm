@@ -23,7 +23,7 @@ fn test_single_thread() {
 #[test]
 #[ignore]
 fn test_basic() {
-    const THREADS: usize = 95;
+    const THREADS: usize = 8;
 
     BufferPoolManager::initialize(64, 256);
     let bpm = BufferPoolManager::get();

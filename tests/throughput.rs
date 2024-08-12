@@ -9,6 +9,7 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
     thread,
 };
+use tokio::task::JoinSet;
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -17,7 +18,7 @@ const GIGABYTE_PAGES: usize = GIGABYTE / PAGE_SIZE;
 
 #[test]
 fn throughput() {
-    const THREADS: usize = 1;
+    const THREADS: usize = 8;
     const TASKS: usize = 32; // tasks per thread
     const OPERATIONS: usize = 1 << 20;
 
@@ -30,7 +31,7 @@ fn throughput() {
     BufferPoolManager::initialize(FRAMES, STORAGE_PAGES);
     let bpm = BufferPoolManager::get();
 
-    let coin = Bernoulli::new(0.0 / 100.0).unwrap();
+    let coin = Bernoulli::new(20.0 / 100.0).unwrap();
 
     println!("Operations: {OPERATIONS}");
 
@@ -39,8 +40,9 @@ fn throughput() {
         for _thread in 0..THREADS {
             s.spawn(move || {
                 BufferPoolManager::start_thread(async move {
+                    let mut set = JoinSet::new();
                     for _task in 0..TASKS {
-                        BufferPoolManager::spawn_local(async move {
+                        let handle = BufferPoolManager::spawn_local(async move {
                             let mut rng = rand::thread_rng();
 
                             for _iteration in 0..ITERATIONS {
@@ -61,6 +63,14 @@ fn throughput() {
                                 COUNTER.fetch_add(1, Ordering::SeqCst);
                             }
                         });
+
+                        set.spawn(handle);
+                    }
+
+                    // Execute all tasks concurrently.
+                    while let Some(res) = set.join_next().await {
+                        let inner_res = res.unwrap();
+                        inner_res.unwrap();
                     }
                 });
             });
