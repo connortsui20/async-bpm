@@ -22,7 +22,7 @@ pub struct PageHandle {
 
     /// A thread-local handle to the storage manager.
     ///
-    /// By including this field, [`PageHandle`] is `!Send` and `!Sync`.
+    /// By including this field, `PageHandle` is `!Send` and `!Sync`.
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) sm: StorageManagerHandle,
 }
@@ -34,6 +34,10 @@ impl PageHandle {
     }
 
     /// Gets a read guard on a logical page, which guarantees the data is in memory.
+    ///
+    /// # Panics
+    ///
+    /// Fatally panics if an I/O error occurs while trying to bring the data into memory.
     pub async fn read(&self) -> ReadPageGuard {
         // Optimization: attempt to read only if we observe that the `is_loaded` flag is set.
         if self.page.is_loaded.load(Ordering::Acquire) {
@@ -62,6 +66,10 @@ impl PageHandle {
     ///
     /// If unsuccessful, this function does nothing and returns `None`. Otherwise, this function
     /// behaves identically to [`PageHandle::read`].
+    ///
+    /// # Panics
+    ///
+    /// Fatally panics if an I/O error occurs while trying to bring the data into memory.
     pub async fn try_read(&self) -> Option<ReadPageGuard> {
         // Optimization: attempt to read only if we observe that the `is_loaded` flag is set.
         if self.page.is_loaded.load(Ordering::Acquire) {
@@ -89,6 +97,10 @@ impl PageHandle {
     }
 
     /// Gets a write guard on a logical page, which guarantees the data is in memory.
+    ///
+    /// # Panics
+    ///
+    /// Fatally panics if an I/O error occurs while trying to bring the data into memory.
     pub async fn write(&self) -> WritePageGuard {
         let mut write_guard = self.page.frame.write().await;
 
@@ -109,6 +121,10 @@ impl PageHandle {
     ///
     /// If unsuccessful, this function does nothing and returns `None`. Otherwise, this function
     /// behaves identically to [`PageHandle::write`].
+    ///
+    /// # Panics
+    ///
+    /// Fatally panics if an I/O error occurs while trying to bring the data into memory.
     pub async fn try_write(&self) -> Option<WritePageGuard> {
         let Ok(mut write_guard) = self.page.frame.try_write() else {
             return None;
@@ -128,6 +144,10 @@ impl PageHandle {
     }
 
     /// Loads page data from persistent storage into a frame in memory.
+    ///
+    /// # Panics
+    ///
+    /// Fatally panics if an I/O error occurs while trying to bring the data into memory.
     async fn load(&self, guard: &mut RwLockWriteGuard<'_, Option<Frame>>) {
         // If someone else got in front of us and loaded the page for us.
         if let Some(frame) = guard.deref().deref() {
@@ -141,16 +161,15 @@ impl PageHandle {
         let frame_group = bpm.get_random_frame_group();
 
         // Wait for a free frame.
-        let mut frame = frame_group
-            .get_free_frame()
-            .await
-            .expect("TODO figure out of this is a recoverable error");
+        let mut frame = frame_group.get_free_frame().await.expect(
+            "FATAL: Encountered an I/O error attempting to find free space for data in memory",
+        );
         let none = frame.replace_page_owner(self.page.clone());
         assert!(none.is_none());
 
         // Read the data in from persistent storage via the storage manager handle.
         let (res, frame) = self.sm.read_into(self.page.pid, frame).await;
-        res.expect("TODO Have to figure out if this is a recoverable error");
+        res.expect("FATAL: Encountered an I/O error trying to read data from persistent storage");
 
         self.page.is_loaded.store(true, Ordering::Release);
         frame.record_access(self.page.clone());
