@@ -14,7 +14,8 @@
 use crate::{
     page::{Page, PageHandle, PageId, PAGE_SIZE},
     storage::{
-        frame::{Frame, FrameGroup, FRAME_GROUP_SIZE},
+        frame::Frame,
+        frame_group::{FrameGroup, FRAME_GROUP_SIZE},
         storage_manager::StorageManager,
     },
 };
