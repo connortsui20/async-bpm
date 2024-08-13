@@ -1,6 +1,9 @@
 //! Implementation of the `PageHandle` type.
 //!
-//! TODO more docs
+//! Users of this library are expected to interact with data in this buffer pool via
+//! [`PageHandle`]s, and thus the only way to get to the data is to request a [`PageHandle`] through
+//! the [`BufferPoolManager`] and then construct a [`ReadPageGuard`] or [`WritePageGuard`] through
+//! one of the methods on [`PageHandle`].
 
 use crate::bpm::BufferPoolManager;
 use crate::page::page_guard::{ReadPageGuard, WritePageGuard};
