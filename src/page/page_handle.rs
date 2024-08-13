@@ -11,6 +11,7 @@ use crate::page::Page;
 use crate::storage::frame::Frame;
 use crate::storage::storage_manager::StorageManagerHandle;
 use derivative::Derivative;
+use std::io::Result;
 use std::ops::Deref;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -38,10 +39,10 @@ impl PageHandle {
 
     /// Gets a read guard on a logical page, which guarantees the data is in memory.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Fatally panics if an I/O error occurs while trying to bring the data into memory.
-    pub async fn read(&self) -> ReadPageGuard {
+    /// Raises an error if an I/O error occurs while trying to load the data from disk into memory.
+    pub async fn read(&self) -> Result<ReadPageGuard> {
         // Optimization: attempt to read only if we observe that the `is_loaded` flag is set.
         if self.page.is_loaded.load(Ordering::Acquire) {
             let read_guard = self.page.frame.read().await;
@@ -50,7 +51,7 @@ impl PageHandle {
             if let Some(frame) = read_guard.deref() {
                 self.page.is_loaded.store(true, Ordering::Release);
                 frame.record_access(self.page.clone());
-                return ReadPageGuard::new(self.page.pid, read_guard);
+                return Ok(ReadPageGuard::new(self.page.pid, read_guard));
             }
 
             // Otherwise someone evicted the page underneath us and we need to load the page into
@@ -60,9 +61,9 @@ impl PageHandle {
 
         let mut write_guard = self.page.frame.write().await;
 
-        self.load(&mut write_guard).await;
+        self.load(&mut write_guard).await?;
 
-        ReadPageGuard::new(self.page.pid, write_guard.downgrade())
+        Ok(ReadPageGuard::new(self.page.pid, write_guard.downgrade()))
     }
 
     /// Attempts to optimistically get a read guard _without_ blocking.
@@ -70,21 +71,21 @@ impl PageHandle {
     /// If unsuccessful, this function does nothing and returns `None`. Otherwise, this function
     /// behaves identically to [`PageHandle::read`].
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Fatally panics if an I/O error occurs while trying to bring the data into memory.
-    pub async fn try_read(&self) -> Option<ReadPageGuard> {
+    /// Raises an error if an I/O error occurs while trying to load the data from disk into memory.
+    pub async fn try_read(&self) -> Result<Option<ReadPageGuard>> {
         // Optimization: attempt to read only if we observe that the `is_loaded` flag is set.
         if self.page.is_loaded.load(Ordering::Acquire) {
             let Ok(read_guard) = self.page.frame.try_read() else {
-                return None;
+                return Ok(None);
             };
 
             // If it is already loaded, then we're done.
             if let Some(frame) = read_guard.deref() {
                 self.page.is_loaded.store(true, Ordering::Release);
                 frame.record_access(self.page.clone());
-                return Some(ReadPageGuard::new(self.page.pid, read_guard));
+                return Ok(Some(ReadPageGuard::new(self.page.pid, read_guard)));
             }
 
             // Otherwise someone evicted the page underneath us and we need to load the page into
@@ -94,30 +95,33 @@ impl PageHandle {
 
         let mut write_guard = self.page.frame.write().await;
 
-        self.load(&mut write_guard).await;
+        self.load(&mut write_guard).await?;
 
-        Some(ReadPageGuard::new(self.page.pid, write_guard.downgrade()))
+        Ok(Some(ReadPageGuard::new(
+            self.page.pid,
+            write_guard.downgrade(),
+        )))
     }
 
     /// Gets a write guard on a logical page, which guarantees the data is in memory.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Fatally panics if an I/O error occurs while trying to bring the data into memory.
-    pub async fn write(&self) -> WritePageGuard {
+    /// Raises an error if an I/O error occurs while trying to load the data from disk into memory.
+    pub async fn write(&self) -> Result<WritePageGuard> {
         let mut write_guard = self.page.frame.write().await;
 
         // If it is already loaded, then we're done.
         if let Some(frame) = write_guard.deref() {
             self.page.is_loaded.store(true, Ordering::Release);
             frame.record_access(self.page.clone());
-            return WritePageGuard::new(self.page.pid, write_guard);
+            return Ok(WritePageGuard::new(self.page.pid, write_guard));
         }
 
         // Otherwise we need to load the page into memory.
-        self.load(&mut write_guard).await;
+        self.load(&mut write_guard).await?;
 
-        WritePageGuard::new(self.page.pid, write_guard)
+        Ok(WritePageGuard::new(self.page.pid, write_guard))
     }
 
     /// Attempts to optimistically get a write guard _without_ blocking.
@@ -125,38 +129,38 @@ impl PageHandle {
     /// If unsuccessful, this function does nothing and returns `None`. Otherwise, this function
     /// behaves identically to [`PageHandle::write`].
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Fatally panics if an I/O error occurs while trying to bring the data into memory.
-    pub async fn try_write(&self) -> Option<WritePageGuard> {
+    /// Raises an error if an I/O error occurs while trying to load the data from disk into memory.
+    pub async fn try_write(&self) -> Result<Option<WritePageGuard>> {
         let Ok(mut write_guard) = self.page.frame.try_write() else {
-            return None;
+            return Ok(None);
         };
 
         // If it is already loaded, then we're done.
         if let Some(frame) = write_guard.deref() {
             self.page.is_loaded.store(true, Ordering::Release);
             frame.record_access(self.page.clone());
-            return Some(WritePageGuard::new(self.page.pid, write_guard));
+            return Ok(Some(WritePageGuard::new(self.page.pid, write_guard)));
         }
 
         // Otherwise we need to load the page into memory.
-        self.load(&mut write_guard).await;
+        self.load(&mut write_guard).await?;
 
-        Some(WritePageGuard::new(self.page.pid, write_guard))
+        Ok(Some(WritePageGuard::new(self.page.pid, write_guard)))
     }
 
     /// Loads page data from persistent storage into a frame in memory.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Fatally panics if an I/O error occurs while trying to bring the data into memory.
-    async fn load(&self, guard: &mut RwLockWriteGuard<'_, Option<Frame>>) {
+    /// Raises an error if an I/O error occurs while trying to load the data from disk into memory.
+    async fn load(&self, guard: &mut RwLockWriteGuard<'_, Option<Frame>>) -> Result<()> {
         // If someone else got in front of us and loaded the page for us.
         if let Some(frame) = guard.deref().deref() {
             self.page.is_loaded.store(true, Ordering::Release);
             frame.record_access(self.page.clone());
-            return;
+            return Ok(());
         }
 
         // Randomly choose a `FrameGroup` to place load this page into.
@@ -164,21 +168,21 @@ impl PageHandle {
         let frame_group = bpm.get_random_frame_group();
 
         // Wait for a free frame.
-        let mut frame = frame_group.get_free_frame().await.expect(
-            "FATAL: Encountered an I/O error attempting to find free space for data in memory",
-        );
+        let mut frame = frame_group.get_free_frame().await?;
         let none = frame.replace_page_owner(self.page.clone());
-        assert!(none.is_none());
+        debug_assert!(none.is_none());
 
         // Read the data in from persistent storage via the storage manager handle.
         let (res, frame) = self.sm.read_into(self.page.pid, frame).await;
-        res.expect("FATAL: Encountered an I/O error trying to read data from persistent storage");
+        res?;
 
         self.page.is_loaded.store(true, Ordering::Release);
         frame.record_access(self.page.clone());
 
         // Give ownership of the frame to the actual page.
         let old: Option<Frame> = guard.replace(frame);
-        assert!(old.is_none());
+        debug_assert!(old.is_none());
+
+        Ok(())
     }
 }

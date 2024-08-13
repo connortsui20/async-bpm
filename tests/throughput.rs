@@ -119,11 +119,11 @@ fn spawn_bench_task<const ZIPF: bool>() -> JoinHandle<()> {
             let ph = bpm.get_page(&pid).await.unwrap();
 
             if coin.sample(&mut rng) {
-                let mut write_guard = ph.write().await;
+                let mut write_guard = ph.write().await.unwrap();
                 write_guard.deref_mut().fill(b'a');
                 write_guard.flush().await.unwrap();
             } else {
-                let read_guard = ph.read().await;
+                let read_guard = ph.read().await.unwrap();
                 let slice = read_guard.deref();
                 std::hint::black_box(slice);
             }

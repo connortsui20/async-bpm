@@ -13,7 +13,7 @@ fn test_single_thread() {
         let ph = bpm.get_page(&pid).await.unwrap();
 
         {
-            let mut guard = ph.write().await;
+            let mut guard = ph.write().await.unwrap();
             guard.deref_mut().fill(b'A');
             guard.flush().await.unwrap();
         }
@@ -39,7 +39,7 @@ fn test_basic() {
                         let ph = bpm.get_page(&pid).await.unwrap();
 
                         {
-                            let mut guard = ph.write().await;
+                            let mut guard = ph.write().await.unwrap();
                             guard.deref_mut().fill(b' ' + index);
                             guard.flush().await.unwrap();
                         }
@@ -51,7 +51,8 @@ fn test_basic() {
                         let ph = bpm.get_page(&pid).await.unwrap();
 
                         {
-                            let mut guard: async_bpm::page::WritePageGuard = ph.write().await;
+                            let mut guard: async_bpm::page::WritePageGuard =
+                                ph.write().await.unwrap();
                             guard.deref_mut().fill(b' ' + index);
                             guard.flush().await.unwrap();
                         }
