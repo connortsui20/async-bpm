@@ -7,6 +7,5 @@
 #![warn(clippy::missing_safety_doc)]
 
 pub mod bpm;
-pub mod io;
 pub mod page;
-pub mod storage;
+pub(crate) mod storage;

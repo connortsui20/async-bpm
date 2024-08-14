@@ -6,20 +6,23 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-async-channel = "2.2.0"
-derivative = "2.2.0"
-futures = "0.3.30"
-io-uring = { version = "0.6.3", features = ["direct-syscall"] }
-libc = "0.2.153"
-rand = "0.8.5"
-send_wrapper = "0.6.0"
-thread_local = "1.1.8"
-tokio = { version = "1.37.0", features = ["sync", "rt", "net", "macros"] }
-tracing = "0.1.40"
-tracing-subscriber = "0.3.18"
+async-channel = "2.3"
+core_affinity = "0.8"
+derivative = "2.2"
+libc = "0.2"
+rand = "0.8"
+send_wrapper = "0.6"
+thread_local = "1.1"
+tokio = { version = "1.39", features = ["macros", "rt", "sync", "time"] }
+tokio-uring = "0.5"
+zipf = "7.0"
 
 [dev-dependencies]
-tokio = { version = "1.37.0", features = ["full"] }
+tokio = { version = "1.39", features = ["full"] }
+
+[profile.dev]
+panic = "abort"
 
 [profile.release]
+panic = "abort"
 debug = true

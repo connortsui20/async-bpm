@@ -1,93 +1,89 @@
-//! This module contains the definition and implementation of [`Frame`] and [`FrameGroup`], which
-//! are types that represent the buffer frames that the buffer pool manager is in charge of.
+//! This module contains the type definiton and implementation for the [`Frame`] struct.
 //!
-//! A [`Frame`] is intended to hold [`PAGE_SIZE`] bytes of data, and is also intended to be shared
-//! with the the kernel to avoid unnecessary `memcpy`s from the kernel's internal buffers into
-//! user-space buffers.
-//!
-//! A [`FrameGroup`] instance groups [`Frame`]s together so that eviction algorithms can be run on
-//! pre-determined groups of frames without having to manage which logical pages are in memory or
-//! not in memory.
+//! TODO more docs.
 
-use super::eviction::EvictionState;
-use crate::page::{PageRef, WritePageGuard, PAGE_SIZE};
-use async_channel::{Receiver, Sender};
+use crate::storage::frame_group::{EvictionState, FrameGroup, FRAME_GROUP_SIZE};
+use crate::{
+    bpm::BufferPoolManager,
+    page::{Page, PAGE_SIZE},
+};
 use std::{
     ops::{Deref, DerefMut},
     sync::Arc,
 };
+use tokio_uring::buf::{IoBuf, IoBufMut};
 
 /// An owned buffer frame, intended to be shared between user and kernel space.
 #[derive(Debug)]
-pub struct Frame {
+pub(crate) struct Frame {
+    /// The unique ID of this `Frame`.
+    ///
+    /// Each `Frame` is assigned a monotonically increasing ID, where every chunk of
+    /// [`FRAME_GROUP_SIZE`] `Frame`s represent a single [`FrameGroup`].
+    frame_id: usize,
+
+    /// The owner of this `Frame`, if one exists.
+    ///
+    /// If a [`Page`] "owns" this `Frame` (the `Frame` holds the [`Page`]s data), then it is the
+    /// responsibility of the [`Page`] to ensure that they place an [`Arc`] into this field via
+    /// [`replace_page_owner`](Self::replace_page_owner).
+    page_owner: Option<Arc<Page>>,
+
     /// The buffer that this `Frame` holds ownership over.
     ///
     /// Since `Frame` is not [`Clone`]able, this `Frame` is guaranteed to have exclusive access to
     /// the mutable buffer.
     buf: &'static mut [u8],
-
-    /// A pointer to the [`FrameGroup`] that this `Frame` belongs to.
-    frame_group: Arc<FrameGroup>,
-
-    /// The index of the frame group that refers to this `Frame`.
-    group_index: usize,
 }
 
 impl Frame {
-    /// Creates a new and owned [`Frame`].
-    pub fn new(buf: &'static mut [u8], frame_group: Arc<FrameGroup>, group_index: usize) -> Self {
-        assert_eq!(buf.len(), PAGE_SIZE);
+    /// Creates a new `Frame` given a static mutable buffer and a frame ID.
+    ///
+    /// All `Frame`s are initialized without any page owner.
+    pub(crate) fn new(frame_id: usize, buf: &'static mut [u8]) -> Self {
         Self {
+            frame_id,
             buf,
-            frame_group,
-            group_index,
+            page_owner: None,
         }
     }
 
-    /// Gets the frame group ID.
-    pub fn frame_group_id(&self) -> usize {
-        self.frame_group.id
+    /// Gets the frame group ID of the group that this frame belongs to.
+    pub(crate) fn group_id(&self) -> usize {
+        self.frame_id / FRAME_GROUP_SIZE
     }
 
-    /// Gets the index of the frame group that refers to this `Frame`.
-    pub fn group_index(&self) -> usize {
-        self.group_index
+    /// Gets an [`Arc`] to the [`FrameGroup`] that this frame belongs to.
+    pub(crate) fn group(&self) -> Arc<FrameGroup> {
+        let bpm = BufferPoolManager::get();
+
+        bpm.get_frame_group(self.group_id())
     }
 
-    /// Returns a raw pointer to this frame's buffer.
-    pub fn as_ptr(&self) -> *const u8 {
-        self.buf.as_ptr()
+    /// Replaces the owning [`Page`] of this `Frame` with another [`Page`].
+    pub(crate) fn replace_page_owner(&mut self, page: Arc<Page>) -> Option<Arc<Page>> {
+        self.page_owner.replace(page)
     }
 
-    /// Returns a mutable pointer to this frame's buffer.
-    pub fn as_mut_ptr(&mut self) -> *mut u8 {
-        self.buf.as_mut_ptr()
+    /// Replaces the owning [`Page`] of this `Frame` with `None`.
+    pub(crate) fn evict_page_owner(&mut self) -> Option<Arc<Page>> {
+        self.page_owner.take()
     }
 
-    /// Gets a `Frame`'s eviction state (via its [`FrameGroup`]).
-    pub fn eviction_state(&self) -> &EvictionState {
-        &self.frame_group.frame_states[self.group_index]
-    }
+    /// Updates the eviction state after this frame has been accessed.
+    ///
+    /// This function will simply update the [`EvictionState`] of the `Frame` to
+    /// [`Hot`](EvictionState::Hot).
+    pub(crate) fn record_access(&self, page: Arc<Page>) {
+        let group = self.group();
+        let index = self.frame_id % FRAME_GROUP_SIZE;
 
-    /// Returns a reference to the owner of this page, if this `Frame` actually has an owner.
-    pub fn get_page_owner(&self) -> Option<PageRef> {
-        self.eviction_state().get_owner()
-    }
+        let mut eviction_guard = group
+            .eviction_states
+            .lock()
+            .expect("Fatal: `EvictionState` lock was poisoned somehow");
 
-    /// Sets the frame's owner as the given page.
-    pub fn set_page_owner(&self, page: PageRef) {
-        self.eviction_state().set_owner(page)
-    }
-
-    /// Changes the `Frame`'s state to `Cold` and returns the previous owner of the current `Frame`,
-    /// if it had a [`PageRef`] owner in the first place.
-    pub fn evict_page_owner(&self) -> Option<PageRef> {
-        self.eviction_state().evict()
-    }
-
-    /// Records an access on the current `Frame`.
-    pub fn record_access(&self) {
-        self.eviction_state().record_access()
+        eviction_guard[index] = EvictionState::Hot(page.clone());
     }
 }
 
@@ -105,108 +101,42 @@ impl DerefMut for Frame {
     }
 }
 
-/// The number of frames in a [`FrameGroup`].
-pub const FRAME_GROUP_SIZE: usize = 64;
-
-/// A fixed group of [`Frame`]s.
+/// # Safety
 ///
-/// This type is intended to facilitate finding a random group of frames to run the eviction
-/// algorithm over.
-#[derive(Debug)]
-pub struct FrameGroup {
-    /// The unique group ID of this `FrameGroup`.
-    id: usize,
+/// The safety contract for `IoBuf` is as follows:
+/// > Buffers passed to `io-uring` operations must reference a stable memory region. While the
+/// > runtime holds ownership to a buffer, the pointer returned by `stable_ptr` must remain valid
+/// > even if the `IoBuf` value is moved.
+///
+/// Since we only use a static reference to correctly allocated memory, all operations are safe.
+unsafe impl IoBuf for Frame {
+    fn stable_ptr(&self) -> *const u8 {
+        self.buf.as_ptr()
+    }
 
-    /// The states of the [`Frame`]s that belong to this `FrameGroup`.
-    frame_states: Box<[EvictionState]>,
+    fn bytes_init(&self) -> usize {
+        PAGE_SIZE
+    }
 
-    /// An asynchronous channel of free [`Frame`]s.
-    free_frames: (Sender<Frame>, Receiver<Frame>),
+    fn bytes_total(&self) -> usize {
+        PAGE_SIZE
+    }
 }
 
-/// A reference-counted reference to a [`FrameGroup`].
-pub type FrameGroupRef = Arc<FrameGroup>;
-
-impl FrameGroup {
-    /// Creates a new `FrameGroup` given an owned vector of static mutable buffers and an ID.
-    ///
-    /// # Panics
-    ///
-    /// This function will panic if the length of the input slice `buffers` is not equal to
-    /// [`FRAME_GROUP_SIZE`].
-    pub fn new(buffers: Vec<&'static mut [u8]>, frame_group_id: usize) -> FrameGroupRef {
-        assert_eq!(buffers.len(), FRAME_GROUP_SIZE);
-
-        let frame_states: Vec<EvictionState> = (0..FRAME_GROUP_SIZE)
-            .map(|_| EvictionState::default())
-            .collect();
-        let frame_states = frame_states.into_boxed_slice();
-        assert_eq!(frame_states.len(), FRAME_GROUP_SIZE);
-
-        let (rx, tx) = async_channel::bounded(FRAME_GROUP_SIZE);
-
-        let frame_group = Arc::new(Self {
-            id: frame_group_id,
-            frame_states,
-            free_frames: (rx.clone(), tx),
-        });
-
-        // All free frames should start inside the `free_frames` channel
-        buffers
-            .into_iter()
-            .enumerate()
-            .map(|(i, buf)| Frame::new(buf, frame_group.clone(), i))
-            .for_each(|frame| {
-                rx.send_blocking(frame).unwrap();
-            });
-
-        frame_group
+/// # Safety
+///
+/// The safety contract for `IoBufMut` is as follows:
+/// > Buffers passed to `io-uring` operations must reference a stable memory region. While the
+/// > runtime holds ownership to a buffer, the pointer returned by `stable_mut_ptr` must remain
+/// > valid even if the `IoBufMut` value is moved.
+///
+/// Since we only use a static reference to correctly allocated memory, all operations are safe.
+unsafe impl IoBufMut for Frame {
+    fn stable_mut_ptr(&mut self) -> *mut u8 {
+        self.buf.as_mut_ptr()
     }
 
-    /// Gets a free frame in this `FrameGroup`.
-    ///
-    /// This function will evict other frames in this `FrameGroup` if there are no free frames
-    /// available.
-    pub async fn get_free_frame(&self) -> Frame {
-        loop {
-            if let Ok(frame) = self.free_frames.1.try_recv() {
-                return frame;
-            }
-
-            self.cool().await;
-        }
-    }
-
-    /// Runs the second chance / clock algorithm on all of the [`Frame`]s in this `FrameGroup`, and
-    /// then evicts all of the frames that have been cooled twice.
-    pub async fn cool(&self) {
-        let mut eviction_pages: Vec<PageRef> = Vec::with_capacity(FRAME_GROUP_SIZE);
-
-        // Cool all of the frames, recording a frame if it is already cool
-        for frame_temperature in self.frame_states.iter() {
-            if let Some(page) = frame_temperature.cool() {
-                eviction_pages.push(page);
-            }
-        }
-
-        if eviction_pages.is_empty() {
-            return;
-        }
-
-        // Attempt to evict all of the already cool frames
-        for page in eviction_pages {
-            // If we cannot get the write guard immediately, then someone else has it and we don't
-            // need to evict this frame now.
-            if let Ok(guard) = page.inner.try_write() {
-                // Someone might have gotten in front of us and already evicted this page
-                if guard.is_some() {
-                    let write_guard = WritePageGuard::new(page.pid, guard);
-
-                    let frame = write_guard.evict().await;
-
-                    self.free_frames.0.send(frame).await.unwrap();
-                }
-            }
-        }
+    unsafe fn set_init(&mut self, _pos: usize) {
+        // All bytes are initialized on allocation, so this function is a no-op.
     }
 }

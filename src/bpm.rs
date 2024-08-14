@@ -8,27 +8,22 @@
 //! the use of any global latches or single points of contention for the entire system. This means
 //! that several parts of the system are implemented quite differently from how a traditional buffer
 //! pool manager would work.
+//!
+//! TODO more docs.
 
 use crate::{
-    page::{Page, PageHandle, PageId, PageRef, PAGE_SIZE},
-    storage::{
-        frame::{FrameGroup, FrameGroupRef, FRAME_GROUP_SIZE},
-        storage_manager::{StorageManager, StorageManagerHandle},
-    },
+    page::{Page, PageHandle, PageId, PAGE_SIZE},
+    storage::{Frame, FrameGroup, StorageManager, FRAME_GROUP_SIZE},
 };
-use core::slice;
-use rand::Rng;
-use send_wrapper::SendWrapper;
+use rand::prelude::*;
+use std::sync::Mutex;
 use std::{
     collections::HashMap,
-    io::IoSliceMut,
-    rc::Rc,
-    sync::{Arc, OnceLock},
+    sync::{atomic::AtomicBool, Arc, OnceLock},
 };
-use tokio::{
-    runtime::{Builder, Runtime},
-    sync::RwLock,
-};
+use std::{future::Future, io::Result};
+use tokio::sync::RwLock;
+use tokio::task;
 
 /// The global buffer pool manager instance.
 static BPM: OnceLock<BufferPoolManager> = OnceLock::new();
@@ -40,99 +35,78 @@ pub struct BufferPoolManager {
     /// The total number of buffer frames this [`BufferPoolManager`] manages.
     num_frames: usize,
 
-    /// A mapping between unique [`PageId`]s and shared [`PageRef`] handles.
-    pages: RwLock<HashMap<PageId, PageRef>>,
+    /// A mapping between unique [`PageId`]s and shared [`Page`]s.
+    pages: Mutex<HashMap<PageId, Arc<Page>>>,
 
-    /// Groups of frames used to demarcate eviction zones.
-    frame_groups: Box<[FrameGroupRef]>,
+    /// All of the [`FrameGroup`]s that hold the [`Frame`]s that this buffer pool manages.
+    frame_groups: Vec<Arc<FrameGroup>>,
 }
 
 impl BufferPoolManager {
     /// Constructs a new buffer pool manager with the given number of [`PAGE_SIZE`]ed buffer frames.
     ///
-    /// The argument `capacity` should be the starting number of logical pages the user of the
-    /// [`BufferPoolManager`] wishes to use, as it will allocate enough space persistent storage to
-    /// initially accommodate that number. TODO this is subject to change once the storage manager
-    /// improves.
-    ///
-    /// This function will create two copies of the buffers allocated, 1 copy for user access
-    /// through `Frame`s and `FrameGroup`s, and another copy for kernel access by registering the
-    /// buffers into the `io_uring` instance via
-    /// [`register_buffers`](io_uring::Submitter::register_buffers).
+    /// Note that this function may round `num_frames` down to a multiple of `FRAME_GROUP_SIZE`,
+    /// which is an internal constant that groups memory frames together. Expect this constant to be
+    /// set to 64 frames, but _do not_ rely on this fact.
     ///
     /// # Panics
     ///
-    /// This function will panic if `num_frames` is not a multiple of
-    /// [`FRAME_GROUP_SIZE`]((crate::storage::frame::FRAME_GROUP_SIZE)).
+    /// This function will panic if `num_frames` is equal to zero, if `capacity` is greater than
+    /// or equal to `num_frames`, or if the caller has already called `initialize` before.
     pub fn initialize(num_frames: usize, capacity: usize) {
         assert!(
             BPM.get().is_none(),
             "Tried to initialize a BufferPoolManager more than once"
         );
+
+        // Round down to the nearest multiple of `FRAME_GROUP_SIZE`.
+        let num_frames = num_frames - (num_frames % FRAME_GROUP_SIZE);
+
         assert!(num_frames != 0);
-        assert_eq!(num_frames % FRAME_GROUP_SIZE, 0);
+        assert!(num_frames < capacity);
+
         let num_groups = num_frames / FRAME_GROUP_SIZE;
 
-        // Allocate all of the buffer memory up front
+        // Allocate all of the buffer memory up front and initialize to 0s.
         let bytes: &'static mut [u8] = vec![0u8; num_frames * PAGE_SIZE].leak();
 
-        // Divide the memory up into `PAGE_SIZE` chunks
-        let slices: Vec<&'static mut [u8]> = bytes.chunks_exact_mut(PAGE_SIZE).collect();
-        assert_eq!(slices.len(), num_frames);
+        // Divide the memory up into `PAGE_SIZE` chunks.
+        let buffers: Vec<&'static mut [u8]> = bytes.chunks_exact_mut(PAGE_SIZE).collect();
+        debug_assert_eq!(buffers.len(), num_frames);
 
-        // Create two copies of a vector of `IoSliceMut` buffer pointers
-        let (mut buffers, registerable_buffers): (Vec<_>, Vec<_>) = slices
+        let mut frames: Vec<Frame> = buffers
             .into_iter()
-            .map(|buf| {
-                // Safety: Since these buffers are only accessed under mutual exclusion and are
-                // never accessed when the kernel has ownership over the `Frames`, this is safe to
-                // create and register into `io_uring` instances.
-                let register_slice =
-                    unsafe { slice::from_raw_parts_mut(buf.as_mut_ptr(), PAGE_SIZE) };
-
-                (buf, IoSliceMut::new(register_slice))
-            })
-            .collect::<Vec<_>>()
-            .into_iter()
-            .unzip();
-        assert_eq!(buffers.len(), num_frames);
-
-        // Create the frame groups, taking the groups of buffers off the back of the buffers vector
-        let frame_groups: Vec<FrameGroupRef> = (0..num_groups)
-            .map(|i| {
-                let buffers: Vec<&'static mut [u8]> =
-                    buffers.split_off(buffers.len() - FRAME_GROUP_SIZE);
-                assert_eq!(buffers.len(), FRAME_GROUP_SIZE, "Not equal at index {i}");
-
-                FrameGroup::new(buffers, num_groups - i - 1)
-            })
+            .enumerate()
+            .map(|(i, buf)| Frame::new(i, buf))
             .collect();
-        assert_eq!(frame_groups.len(), num_frames / FRAME_GROUP_SIZE);
-        assert!(
-            buffers.is_empty(),
-            "All buffers should have been moved into frame groups"
-        );
 
-        // Create the bpm and set it as the global static bpm instance
+        let mut frame_groups: Vec<Arc<FrameGroup>> = Vec::with_capacity(num_groups);
+
+        for id in 0..num_groups {
+            let group: Vec<Frame> = (0..FRAME_GROUP_SIZE)
+                .map(|_| frames.pop().expect("Somehow ran out of frames"))
+                .collect();
+            frame_groups.push(Arc::new(FrameGroup::new(id, group)));
+        }
+
+        // Create the buffer pool and set it as the global static instance.
         BPM.set(Self {
             num_frames,
-            frame_groups: frame_groups.into_boxed_slice(),
-            pages: RwLock::new(HashMap::with_capacity(num_frames)),
+            pages: Mutex::new(HashMap::with_capacity(num_frames)),
+            frame_groups,
         })
         .expect("Tried to initialize the buffer pool manager more than once");
 
-        // This copy will only be used to register into the `io_uring` instance, and never accessed
-        let registerable_buffers = registerable_buffers.into_boxed_slice();
-
-        // Initialize the global `StorageManager` instance
-        StorageManager::initialize(8, capacity, registerable_buffers);
+        // Also initialize the global `StorageManager` instance.
+        StorageManager::initialize(capacity);
     }
 
     /// Retrieve a static reference to the global buffer pool manager.
     ///
     /// # Panics
     ///
-    /// This function will panic if it is called before a call to [`BufferPoolManager::initialize`].
+    /// This function will panic if it is called before [`BufferPoolManager::initialize`] has been
+    /// called.
     pub fn get() -> &'static Self {
         BPM.get()
             .expect("Tried to get a reference to the BPM before it was initialized")
@@ -143,84 +117,109 @@ impl BufferPoolManager {
         self.num_frames
     }
 
-    /// Returns a pointer to a random group of frames.
-    ///
-    /// Intended for use by an eviction algorithm.
-    pub(crate) fn get_random_frame_group(&self) -> FrameGroupRef {
-        let mut rng = rand::thread_rng();
-        let index = rng.gen_range(0..self.frame_groups.len());
-
-        self.frame_groups[index].clone()
-    }
-
-    /// Creates a thread-local page handle of the buffer pool manager, returning a [`PageHandle`] to
-    /// the logical page data.
-    ///
-    /// If the page already exists, this function will return that instead.
-    async fn create_page(&self, pid: &PageId) -> PageHandle {
-        // First check if it exists already
-        let mut pages_guard = self.pages.write().await;
-        if let Some(page) = pages_guard.get(pid) {
-            return PageHandle::new(page.clone(), StorageManager::get().create_handle());
-        }
-
-        // Create the new page and update the global map of pages
-        let page = Arc::new(Page {
-            pid: *pid,
-            inner: RwLock::new(None),
-        });
-
-        pages_guard.insert(*pid, page.clone());
-
-        // Create the page handle and return
-        PageHandle::new(page, StorageManager::get().create_handle())
-    }
-
     /// Gets a thread-local page handle of the buffer pool manager, returning a [`PageHandle`] to
     /// the logical page data.
     ///
     /// If the page does not already exist, this function will create it and then return it.
-    pub async fn get_page(&self, pid: &PageId) -> PageHandle {
-        let pages_guard = self.pages.read().await;
+    ///
+    /// # Errors
+    ///
+    /// If this function is unable to create a [`File`](tokio_uring::fs::File), this function will
+    /// raise the I/O error in the form of [`Result`].
+    #[allow(clippy::missing_panics_doc)]
+    pub fn get_page(&self, pid: &PageId) -> Result<PageHandle> {
+        let sm = StorageManager::get().create_handle()?;
+
+        let mut pages_guard = self
+            .pages
+            .lock()
+            .expect("Fatal: page table lock was poisoned somehow");
 
         // Get the page if it exists, otherwise create it and return
         let page = match pages_guard.get(pid) {
             Some(page) => page.clone(),
             None => {
-                drop(pages_guard);
-                return self.create_page(pid).await;
+                // Create the new page and update the global map of pages
+                let page = Arc::new(Page {
+                    pid: *pid,
+                    is_loaded: AtomicBool::new(false),
+                    frame: RwLock::new(None),
+                });
+
+                pages_guard.insert(*pid, page.clone());
+                page
             }
         };
 
-        PageHandle::new(page, StorageManager::get().create_handle())
+        Ok(PageHandle::new(page, sm))
     }
 
-    /// Creates a thread-local [`StorageManagerHandle`] to the inner [`StorageManager`].
-    pub fn get_storage_manager_handle(&self) -> StorageManagerHandle {
-        StorageManager::get().create_handle()
+    /// Gets an [`Arc`] to a [`FrameGroup`] given the frame group ID.
+    pub(crate) fn get_frame_group(&self, group_id: usize) -> Arc<FrameGroup> {
+        self.frame_groups[group_id].clone()
     }
 
-    /// Creates a `tokio` thread-local [`Runtime`] that works with
-    /// [`IoUringAsync`](crate::io::IoUringAsync) by calling `submit` and `poll` every time a worker
-    /// thread gets parked.
+    /// Gets an [`Arc`] to a random [`FrameGroup`] in the buffer pool manager.
+    ///
+    /// Intended for use by an eviction algorithm.
+    pub(crate) fn get_random_frame_group(&self) -> Arc<FrameGroup> {
+        let mut rng = rand::thread_rng();
+        let index = rng.gen_range(0..self.frame_groups.len());
+
+        self.get_frame_group(index)
+    }
+
+    /// Starts a [`tokio_uring`] runtime on a single thread that runs the given [`Future`].
+    ///
+    /// TODO more docs
     ///
     /// # Panics
     ///
-    /// This function will panic if it is unable to build the [`Runtime`].
-    pub fn build_thread_runtime(&self) -> Runtime {
-        let dmh = self.get_storage_manager_handle();
-        let uring = Rc::new(dmh.get_uring());
-        let uring_daemon = SendWrapper::new(uring.clone());
+    /// This function will panic if it is unable to spawn the eviction task for some reason.
+    pub fn start_thread<F: Future>(future: F) -> F::Output {
+        tokio_uring::start(async move {
+            tokio::select! {
+                output = future => output,
+                // TODO figure out why including this is this slower
+                _ = Self::spawn_evictor() => unreachable!("The eviction task should never return")
+            }
+        })
+    }
 
-        Builder::new_current_thread()
-            .on_thread_park(move || {
-                uring_daemon
-                    .submit()
-                    .expect("Was unable to submit `io_uring` operations");
-                uring_daemon.poll();
-            })
-            .enable_all()
-            .build()
-            .unwrap()
+    /// Spawns a thread-local task on the current thread.
+    ///
+    /// Note that the caller must `.await` the return of this function in order to run the future.
+    ///
+    /// TODO docs
+    pub fn spawn_local<T: Future + 'static>(task: T) -> task::JoinHandle<T::Output> {
+        tokio_uring::spawn(task)
+    }
+
+    /// Spawns an eviction task.
+    ///
+    /// TODO more docs
+    ///
+    /// # Panics
+    ///
+    /// Panics if unable to evict frames due to an I/O error.
+    pub fn spawn_evictor() -> task::JoinHandle<()> {
+        tokio_uring::spawn(async {
+            let bpm = Self::get();
+            loop {
+                tokio::task::yield_now().await;
+
+                let group = bpm.get_random_frame_group();
+                if group.num_free_frames() < FRAME_GROUP_SIZE / 10 {
+                    group
+                        .cool_frames()
+                        .await
+                        .expect("Unable to evict frames due to I/O error");
+                }
+
+                // Sleep once we have nothing to do.
+                // TODO removing this should not cause the system to halt.
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            }
+        })
     }
 }
