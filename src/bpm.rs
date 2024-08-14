@@ -20,12 +20,13 @@ use crate::{
     },
 };
 use rand::prelude::*;
+use std::sync::Mutex;
 use std::{
     collections::HashMap,
     sync::{atomic::AtomicBool, Arc, OnceLock},
 };
 use std::{future::Future, io::Result};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 use tokio::task;
 
 /// The global buffer pool manager instance.
@@ -129,10 +130,14 @@ impl BufferPoolManager {
     ///
     /// If this function is unable to create a [`File`](tokio_uring::fs::File), this function will
     /// raise the I/O error in the form of [`Result`].
-    pub async fn get_page(&self, pid: &PageId) -> Result<PageHandle> {
-        let sm = StorageManager::get().create_handle().await?;
+    #[allow(clippy::missing_panics_doc)]
+    pub fn get_page(&self, pid: &PageId) -> Result<PageHandle> {
+        let sm = StorageManager::get().create_handle()?;
 
-        let mut pages_guard = self.pages.lock().await;
+        let mut pages_guard = self
+            .pages
+            .lock()
+            .expect("Fatal: page table lock was poisoned somehow");
 
         // Get the page if it exists, otherwise create it and return
         let page = match pages_guard.get(pid) {

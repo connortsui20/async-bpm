@@ -129,7 +129,7 @@ impl FrameGroup {
             return Ok(());
         }
 
-        let sm = StorageManager::get().create_handle().await?;
+        let sm = StorageManager::get().create_handle()?;
 
         // Attempt to evict all of the already cool frames.
         for page in eviction_pages {

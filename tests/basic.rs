@@ -10,7 +10,7 @@ fn test_single_thread() {
 
     BufferPoolManager::start_thread(async move {
         let pid = PageId::new(0);
-        let ph = bpm.get_page(&pid).await.unwrap();
+        let ph = bpm.get_page(&pid).unwrap();
 
         {
             let mut guard = ph.write().await.unwrap();
@@ -36,7 +36,7 @@ fn test_basic() {
                     let h1 = BufferPoolManager::spawn_local(async move {
                         let index = 2 * i as u8;
                         let pid = PageId::new(index as u64);
-                        let ph = bpm.get_page(&pid).await.unwrap();
+                        let ph = bpm.get_page(&pid).unwrap();
 
                         {
                             let mut guard = ph.write().await.unwrap();
@@ -48,7 +48,7 @@ fn test_basic() {
                     let h2 = BufferPoolManager::spawn_local(async move {
                         let index = ((2 * i) + 1) as u8;
                         let pid = PageId::new(index as u64);
-                        let ph = bpm.get_page(&pid).await.unwrap();
+                        let ph = bpm.get_page(&pid).unwrap();
 
                         {
                             let mut guard: async_bpm::page::WritePageGuard =

@@ -16,7 +16,7 @@ use std::io::Result;
 use std::ops::Deref;
 use std::{rc::Rc, sync::OnceLock};
 use thread_local::ThreadLocal;
-use tokio_uring::fs::{File, OpenOptions};
+use tokio_uring::fs::File;
 use tokio_uring::BufResult;
 
 /// TODO refactor this out
@@ -79,17 +79,17 @@ impl StorageManager {
     /// # Errors
     ///
     /// Returns an error if unable to create a [`File`] to the database files on disk.
-    pub(crate) async fn create_handle(&self) -> Result<StorageManagerHandle> {
+    pub(crate) fn create_handle(&self) -> Result<StorageManagerHandle> {
         let file = match self.file.get() {
             Some(file) => file.deref().clone(),
             None => {
-                let file = OpenOptions::new()
+                let std_file = std::fs::OpenOptions::new()
                     .read(true)
                     .write(true)
-                    .open(DATABASE_NAME)
-                    .await?;
+                    .open(DATABASE_NAME)?;
 
-                let file = SendWrapper::new(Rc::new(file));
+                let uring_file = tokio_uring::fs::File::from_std(std_file);
+                let file = SendWrapper::new(Rc::new(uring_file));
 
                 self.file.get_or(move || file).deref().clone()
             }
