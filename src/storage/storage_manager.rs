@@ -74,6 +74,8 @@ impl StorageManager {
     /// Creates a thread-local [`StorageManagerHandle`] that has a reference back to this storage
     /// manager.
     ///
+    /// TODO make this synchronous and blocking?
+    ///
     /// # Errors
     ///
     /// Returns an error if unable to create a [`File`] to the database files on disk.

@@ -81,7 +81,7 @@ impl Frame {
         let mut eviction_guard = group
             .eviction_states
             .lock()
-            .expect("EvictionState lock was poisoned somehow");
+            .expect("Fatal: `EvictionState` lock was poisoned somehow");
 
         eviction_guard[index] = EvictionState::Hot(page.clone());
     }

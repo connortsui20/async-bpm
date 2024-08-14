@@ -115,7 +115,7 @@ impl FrameGroup {
             let mut evicton_guard = self
                 .eviction_states
                 .lock()
-                .expect("EvictionState lock was poisoned somehow");
+                .expect("Fatal: `EvictionState` lock was poisoned somehow");
 
             for frame_temperature in evicton_guard.iter_mut() {
                 if let Some(page) = frame_temperature.cool() {
