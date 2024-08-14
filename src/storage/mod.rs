@@ -8,7 +8,6 @@
 //! A [`FrameGroup`] instance groups [`Frame`]s together so that evictions do not have to search
 //! every single [`Frame`] in the buffer pool for an eviction candidate.
 
-pub(crate) mod eviction;
 pub(crate) mod frame;
 pub(crate) mod frame_group;
 pub(crate) mod storage_manager;
