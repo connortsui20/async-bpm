@@ -13,11 +13,7 @@
 
 use crate::{
     page::{Page, PageHandle, PageId, PAGE_SIZE},
-    storage::{
-        frame::Frame,
-        frame_group::{FrameGroup, FRAME_GROUP_SIZE},
-        storage_manager::StorageManager,
-    },
+    storage::{Frame, FrameGroup, StorageManager, FRAME_GROUP_SIZE},
 };
 use rand::prelude::*;
 use std::sync::Mutex;

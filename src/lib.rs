@@ -8,4 +8,4 @@
 
 pub mod bpm;
 pub mod page;
-pub mod storage;
+pub(crate) mod storage;

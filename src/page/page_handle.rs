@@ -8,8 +8,7 @@
 use crate::bpm::BufferPoolManager;
 use crate::page::page_guard::{ReadPageGuard, WritePageGuard};
 use crate::page::Page;
-use crate::storage::frame::Frame;
-use crate::storage::storage_manager::StorageManagerHandle;
+use crate::storage::{Frame, StorageManagerHandle};
 use derivative::Derivative;
 use std::io::Result;
 use std::ops::Deref;

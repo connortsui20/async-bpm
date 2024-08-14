@@ -1,7 +1,7 @@
 //! Wrappers around `tokio`'s `RwLockReadGuard` and `RwLockWriteGuard`, dedicated for pages of data.
 
 use crate::page::PageId;
-use crate::storage::{frame::Frame, storage_manager::StorageManager};
+use crate::storage::{Frame, StorageManager};
 use std::io::Result;
 use std::ops::{Deref, DerefMut};
 use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};

@@ -1,6 +1,6 @@
 //! Definitions and types related to logical pages of data.
 
-use crate::storage::{frame::Frame, storage_manager::StorageManager};
+use crate::storage::{Frame, StorageManager};
 use derivative::Derivative;
 use std::{fmt::Display, sync::atomic::AtomicBool};
 use tokio::sync::RwLock;
