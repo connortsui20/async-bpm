@@ -6,6 +6,8 @@
 #![warn(clippy::missing_panics_doc)]
 #![warn(clippy::missing_safety_doc)]
 
-pub mod bpm;
+mod bpm;
 pub mod page;
 pub(crate) mod storage;
+
+pub use bpm::BufferPoolManager;

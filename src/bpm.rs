@@ -1,15 +1,6 @@
 //! This module contains the declaration and implementation of the [`BufferPoolManager`] type.
 //!
-//! This buffer pool manager has an asynchronous implementation that is built on top of an
-//! asynchronous persistent / non-volatile storage manager, which is itself built on top of the
-//! Linux `io_uring` interface.
-//!
-//! The goal for this buffer pool manager is to exploit parallelism as much as possible by limiting
-//! the use of any global latches or single points of contention for the entire system. This means
-//! that several parts of the system are implemented quite differently from how a traditional buffer
-//! pool manager would work.
-//!
-//! TODO more docs.
+//! TODO docs.
 
 use crate::{
     page::{Page, PageHandle, PageId, PAGE_SIZE},
@@ -36,14 +27,30 @@ pub struct BufferPoolManager {
     num_frames: usize,
 
     /// A mapping between unique [`PageId`]s and shared [`Page`]s.
+    ///
+    /// Note that this is _not_ the same as a page table in a traditional buffer pool manager. In a
+    /// traditional buffer pool manager, _every_ single lookup to a page must go through a global
+    /// hash table. This hash table is different, in that a task is expected to get a page handle
+    /// _once_ from the buffer pool, and then use that page handle to access the underlying page
+    /// instead.
+    ///
+    /// TODO it is not strictly necessary that we need to store the `Arc<Page>` inside the hash
+    /// table - the user should be allowed to manage the pages themselves (for example, if they are
+    /// performing a scan we don't want to saturate this hash table with temporary pages).
     pages: Mutex<HashMap<PageId, Arc<Page>>>,
 
     /// All of the [`FrameGroup`]s that hold the [`Frame`]s that this buffer pool manages.
     frame_groups: Vec<Arc<FrameGroup>>,
 }
 
+/// TODO add method that creates a page but does not add it to the global page table.
 impl BufferPoolManager {
-    /// Constructs a new buffer pool manager with the given number of [`PAGE_SIZE`]ed buffer frames.
+    /// Constructs a new buffer pool manager with the given number of [`PAGE_SIZE`]ed buffer frames
+    /// and an initial file capacity for storage.
+    ///
+    /// The amount of memory the buffer pool will manage is determined by `num_frames`, and the
+    /// amount of data stored in persistent storage (for example, a hard drive) is determined by
+    /// `capacity`.
     ///
     /// Note that this function may round `num_frames` down to a multiple of `FRAME_GROUP_SIZE`,
     /// which is an internal constant that groups memory frames together. Expect this constant to be

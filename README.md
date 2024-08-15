@@ -1,140 +1,146 @@
 # Asynchronous Buffer Pool Manager
 
-An asynchronous buffer pool manager, built on top of `tokio` and `io_uring`.
+An asynchronous buffer pool manager, built on top of [`tokio_uring`] and [`tokio`].
+
+The goal of this buffer pool manager is to exploit parallelism as much as possible by eliminating
+the use of any global locks/latches or any single points of contention for the entire system. This
+means that several parts of this system are implemented quite differently to how a traditional
+buffer pool manager would be implemented.
+
+Most notable is the fact that I/O is non-blocking, courtesy of the `io_uring` Linux interface that
+the [`tokio_uring`] interface is built on top of. The second most notable part of this system is
+that there is no global page table that users must go through to access any page of data. All page
+data and data movement (eviction) is _decentralized_. 
+
+By making use of [`tokio_uring`], this buffer pool manager is implemented with a thread-per-core
+model where many light-weight asynchronous tasks can be scheduled on each operating system provided
+thread. And because the system is thread-per-core (and not a work-stealing system), it is the
+responsibility of the caller to ensure that tasks are balanced between threads.
+
+# Usage
+
+The intended usage is as follows:
+-   Call [`BufferPoolManager::initialize`] to set the memory and storage sizes
+-   Spawn 1 operating system thread for every CPU core
+-   Call [`BufferPoolManager::start_thread`] on each thread to initialize each for the buffer pool
+-   For each of the tasks on each thread, call [`BufferPoolManager::spawn_local`]
+-   To access a page of data, use [`PageHandle`](crate::page::PageHandle)s via
+[`BufferPoolManager::get_page`]
+-   Use the [`read`](crate::page::PageHandle::read) or [`write`](crate::page::PageHandle::write)
+methods on [`PageHandle`](crate::page::PageHandle) and then perform the intended operations over the
+page's data
+
+### Single-Threaded Example
+
+Here is a simple example of starting the [`BufferPoolManager`] on a single thread (in this case,
+the main thread). It accesses a single page from persistent storage, fills it with the character
+`'A'`, and then writes it out to persistent storage.
+
+```rust
+use async_bpm::BufferPoolManager;
+use async_bpm::page::PageId;
+use std::ops::DerefMut;
+
+// Initialize a buffer pool with 64 frames and 128 pages on peristent storage.
+BufferPoolManager::initialize(64, 128);
+let bpm = BufferPoolManager::get();
+
+BufferPoolManager::start_thread(async move {
+    let pid = PageId::new(0);
+    let ph = bpm.get_page(&pid).unwrap();
+
+    {
+        let mut guard = ph.write().await.unwrap();
+        guard.deref_mut().fill(b'A');
+        guard.flush().await.unwrap();
+   }
+});
+```
+
+Since there should be only 1 [`BufferPoolManager`] instance at a time, the
+[`BufferPoolManager::get`] method returns a `&'static` reference to a global instance. This
+global buffer pool instance contains the global storage manager instance.
+
+Note that the call to [`flush`](crate::page::WritePageGuard::flush) is not strictly
+necessary, as it is only a way to force an immediate write out to persistent storage.
+
+### Multi-Threaded Example
+
+Here is a multi-threaded example on 8 threads, where each thread spawns 2 tasks that write a
+unique character to persistent storage.
+
+```rust
+use async_bpm::BufferPoolManager;
+use async_bpm::page::PageId;
+use std::ops::DerefMut;
+
+const THREADS: usize = 8;
+
+BufferPoolManager::initialize(64, 256);
+let bpm = BufferPoolManager::get();
+
+// Spawn all threads
+std::thread::scope(|s| {
+    for i in 0..THREADS {
+        s.spawn(move || {
+            BufferPoolManager::start_thread(async move {
+                let h1 = BufferPoolManager::spawn_local(async move {
+                    let index = 2 * i as u8;
+                    let pid = PageId::new(index as u64);
+                    let ph = bpm.get_page(&pid).unwrap();
+
+                    {
+                        let mut guard = ph.write().await.unwrap();
+                        guard.deref_mut().fill(b' ' + index);
+                        guard.flush().await.unwrap();
+                    }
+                });
+
+                let h2 = BufferPoolManager::spawn_local(async move {
+                    let index = ((2 * i) + 1) as u8;
+                    let pid = PageId::new(index as u64);
+                    let ph = bpm.get_page(&pid).unwrap();
+
+                    {
+                        let mut guard: async_bpm::page::WritePageGuard =
+                            ph.write().await.unwrap();
+                        guard.deref_mut().fill(b' ' + index);
+                        guard.flush().await.unwrap();
+                    }
+                });
+
+                let (res1, res2) = tokio::join!(h1, h2);
+                res1.unwrap();
+                res2.unwrap();
+            });
+        });
+    }
+});
+```
+
+### More Examples
+
+TODO more examples.
+
+<br>
 
 # Design
 
-This model is aimed at a thread-per-core model with multiple persistent storage drives.
-This implies that tasks (coroutines) given to worker threads cannot be moved between threads
-(or in other words, are `!Send`).
-So it is on a global scheduler to assign tasks to worker threads appropriately.
-Once a task has been given to a worker thread, the asynchronous runtime's
-scheduler is in charge of managing the cooperative tasks.
+This system is designed as a thread-per-core model with multiple persistent storage devices. The
+reason that it is not a multi-threaded worker pool model like the [`tokio`] runtime is due to how
+the `io_uring` Linux interface works. I/O operations on `io_uring` are submitted to a single
+`io_uring` instance that is registered per-thread to eliminate contention. To move a task to a
+separate thread would mean that the task could no longer poll the operation result off of the
+thread-local `io_uring` completion queue. Thus, lightweight asynchronous tasks given to worker 
+threads cannot be moved between threads (or in other words, are `!Send`). 
 
-An implication of the above is that this model will not work with
-`tokio`'s work-stealing multi-threaded runtime.
-However, the benefits of parallelism in this model at the cost of
-having to manually manage load balancing is likely worth it.
-Additionally, a DBMS that could theoretically use this model would likely have
-better knowledge of how to schedule things appropriately.
+A consequence of this fact is that threads cannot work-steal in the same manner that the [`tokio`]
+runtime allows threads to do. It is thus the responsibility of some global scheduler to assign tasks
+to worker threads appropriately. Then, once a task has been given to a worker thread, the buffer
+pool's internal thread-local scheduler (which is just a [`tokio_uring`] local scheduler) is in
+charge of managing all of the cooperative tasks.
 
-Finally, this is heavily inspired by
-[this Leanstore paper](https://www.vldb.org/pvldb/vol16/p2090-haas.pdf),
-and future work could introduce the all-to-all model of threads to distinct SSDs,
-where each worker thread has a dedicated `io_uring` instance for every physical SSD.
-
-# Objects and Types
-
-## Thread Locals
-
--   `PageHandle`: A shared pointer to a `Page` (through an `Arc`)
--   Local `io_uring` instances (that are `!Send`)
--   Futures stored in a local hash table defining the lifecycle of an `io_uring` event (private)
-
-### Local Daemons
-
-These thread-local daemons exist as foreground tasks, just like any other task the DBMS might have.
-
--   Listener: Dedicated to polling local `io_uring` completion events
--   Submitter: Dedicated to submitting `io_uring` submission entries
--   Evictor: Dedicated to cooling `Hot` pages and evicting `Cool` pages
-
-## Shared Objects
-
--   Shared pre-registered buffers / frames
-    -   Frames are owned types (can only belong to a specific `Page`)
-    -   Frames also have pointers back to their parent `Page`s
-    -   _Will have to register multiple sets, as you can only register 1024 frames at a time_
--   Shared multi-producer multi-consumer channel of frames
--   `Page`: A hybrid-latched (read-write locked for now) page header
-    -   State is either `Unloaded`, `Loading` (private), or `Loaded`
-        -   `Unloaded` implies that the data is not in memory
-        -   `Loading` implies that the data is being loaded from persistent storage, and contains a future (private)
-        -   `Loaded` implies the data is on one of the pre-registered buffers, and owns a registered buffer
-    -   `Page`s also have eviction state
-        -   `Hot` implies that this is a frequently-accessed page
-        -   `Cool` implies that it is not frequently accessed, and might be evicted soon
-
-Note that the eviction state is really just an optimization for making a decision on pages to evict.
-The page eviction state _does not_ imply anything about the state of a page
-(so a page could be `Hot` and also `Unloaded`), and all accesses to a page must still go through the hybrid latch.
-
-In summary, the possible states that the `Page` can be in is:
-
--   `Loaded` and `Hot` (frequently accessed)
--   `Loaded` and `Cool` (potential candidate for eviction)
--   `Loading` (`Hot`/`Cold` plus private `io_uring` event state)
--   `Unloaded` (`Cold`)
-
-# Algorithms
-
-**TODO** this section needs to be updated.
-
-### Write Access Algorithm
-
-Let P1 be the page we want to get write access for.
-
--   Set eviction state to `Hot`
--   Write-lock P1
--   If `Loaded` (SEMI-HOT PATH):
-    -   Modify the page data
-    -   Unlock and return
--   Else `Unloaded`, and we need to load the page
-    -   Load a page via the [load algorithm](#load-algorithm)
-    -   Modify the page data
-    -   Unlock and return
-
-### Read Access Algorithm
-
-Let P1 be the page we want to get read access for.
-All optimistic reads have to be done through a read closure (cannot construct a reference `&`).
-
--   Set eviction state to `Hot`
--   Optimistically read P1
--   If `Loaded` (HOT PATH):
-    -   Read the page data optimistically and return
-    -   If the optimistic read fails, fallback to a pessimistic read
-        -   If still `Loaded` (SEMI-HOT PATH):
-            -   Read normally and return
-        -   Else it is now `Unloaded`, so continue
--   The state is `Unloaded`, and we need to load a page
-    -   Upgrade the read lock into a write lock (either drop and retake, or directly upgrade)
-    -   Load a page via the [load algorithm](#load-algorithm)
-    -   Read the page data
-    -   Unlock and return
-
-### Load algorithm
-
-Let P1 be the page we want to load from persistent storage into memory. The caller must have the write lock on P1.
-Once this algorithm is complete, the page is guaranteed to be loaded into the owned frame,
-and the page eviction state will be `Hot`.
-
--   If the page is `Loaded`, then immediately return
--   Otherwise, this page is `Unloaded`
--   `await` a free frame from the global channel of frames
--   Set the frame's parent pointer to P1
--   Read P1's data from persistent storage into the buffer
--   `await` read completion from the local `io_uring` instance
--   At the end, set the page eviction state to `Hot`
-
-### General Eviction Algorithm
-
-On every worker thread, there should be at least 1 "background" task
-(not scheduled by the global scheduler) dedicated to evicting pages.
-It will aim to have some certain threshold of free pages in the free list.
-
--   Iterate over all frames
--   Collect the list of `Page`s that are `Loaded` (should not be more than the number of frames)
--   For every `Page` that is `Hot`, change to `Cool`
--   Collect all `Cool` pages
--   Randomly choose some (small) constant number of pages from the list of initially `Cool` pages
--   `join!` the following page eviction futures:
-    -   For each page Px we want to evict:
-        -   Check if Px has been changed to `Hot`, and if so, return early
-        -   Write-lock Px
-        -   If Px is now either `Hot` or `Unloaded`, unlock and return early
-        -   Write Px's buffer data out to persistent storage via the local `io_uring` instance
-        -   `await` write completion from the local `io_uring` instance
-        -   Set Px to `Unloaded`
-        -   Send Px's frame to the global channel of free frames
-        -   Unlock Px
+This buffer pool manager is heavily inspired by leanstore, which you can read about
+[here](https://www.vldb.org/pvldb/vol16/p2090-haas.pdf), and future work could introduce the
+all-to-all model of threads to distinct SSDs, where each worker thread has a dedicated `io_uring`
+instance for every physical SSD.

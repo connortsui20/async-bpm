@@ -1,4 +1,4 @@
-use async_bpm::{bpm::BufferPoolManager, page::PageId};
+use async_bpm::{page::PageId, BufferPoolManager};
 use std::ops::DerefMut;
 use std::thread;
 

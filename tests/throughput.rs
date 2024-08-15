@@ -1,6 +1,6 @@
 use async_bpm::{
-    bpm::BufferPoolManager,
     page::{PageId, PAGE_SIZE},
+    BufferPoolManager,
 };
 use core_affinity::CoreId;
 use rand::distributions::Bernoulli;
