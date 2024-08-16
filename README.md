@@ -25,10 +25,10 @@ The intended usage is as follows:
 -   Call [`BufferPoolManager::start_thread`] on each thread to initialize each for the buffer pool
 -   For each of the tasks on each thread, call [`BufferPoolManager::spawn_local`]
 -   To access a page of data, use [`PageHandle`](crate::page::PageHandle)s via
-[`BufferPoolManager::get_page`]
+    [`BufferPoolManager::get_page`]
 -   Use the [`read`](crate::page::PageHandle::read) or [`write`](crate::page::PageHandle::write)
-methods on [`PageHandle`](crate::page::PageHandle) and then perform the intended operations over the
-page's data
+    methods on [`PageHandle`](crate::page::PageHandle) and then perform the intended operations over
+    the page's data
 
 ### Single-Threaded Example
 

@@ -18,6 +18,7 @@ tokio-uring = "0.5"
 zipf = "7.0"
 
 [dev-dependencies]
+futures-diagnose = "1.0"
 tokio = { version = "1.39", features = ["full"] }
 
 [profile.dev]

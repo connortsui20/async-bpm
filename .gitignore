@@ -20,7 +20,8 @@ Dockerfile
 *.test
 *.db
 
-# Flamegraph output
-*.svg
+# Profiling output
 *.data
+*.json
 *.old
+*.svg
