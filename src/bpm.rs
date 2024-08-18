@@ -7,11 +7,8 @@ use crate::{
     storage::{Frame, FrameGroup, StorageManager, FRAME_GROUP_SIZE},
 };
 use rand::prelude::*;
-use std::sync::Mutex;
-use std::{
-    collections::HashMap,
-    sync::{atomic::AtomicBool, Arc, OnceLock},
-};
+use scc::hash_map::HashMap;
+use std::sync::{atomic::AtomicBool, Arc, OnceLock};
 use std::{future::Future, io::Result};
 use tokio::sync::RwLock;
 use tokio::task;
@@ -37,7 +34,7 @@ pub struct BufferPoolManager {
     /// TODO it is not strictly necessary that we need to store the `Arc<Page>` inside the hash
     /// table - the user should be allowed to manage the pages themselves (for example, if they are
     /// performing a scan we don't want to saturate this hash table with temporary pages).
-    pages: Mutex<HashMap<PageId, Arc<Page>>>,
+    pages: HashMap<PageId, Arc<Page>>,
 
     /// All of the [`FrameGroup`]s that hold the [`Frame`]s that this buffer pool manages.
     frame_groups: Vec<Arc<FrameGroup>>,
@@ -99,7 +96,7 @@ impl BufferPoolManager {
         // Create the buffer pool and set it as the global static instance.
         BPM.set(Self {
             num_frames,
-            pages: Mutex::new(HashMap::with_capacity(num_frames)),
+            pages: HashMap::with_capacity(num_frames),
             frame_groups,
         })
         .expect("Tried to initialize the buffer pool manager more than once");
@@ -133,30 +130,22 @@ impl BufferPoolManager {
     ///
     /// If this function is unable to create a [`File`](tokio_uring::fs::File), this function will
     /// raise the I/O error in the form of [`Result`].
-    #[allow(clippy::missing_panics_doc)]
     pub fn get_page(&self, pid: &PageId) -> Result<PageHandle> {
-        let sm = StorageManager::get().create_handle()?;
+        let sm: crate::storage::StorageManagerHandle = StorageManager::get().create_handle()?;
 
-        let mut pages_guard = self
+        // Get the page if it exists, otherwise create a new one return that.
+        let page = self
             .pages
-            .lock()
-            .expect("Fatal: page table lock was poisoned somehow");
-
-        // Get the page if it exists, otherwise create it and return
-        let page = match pages_guard.get(pid) {
-            Some(page) => page.clone(),
-            None => {
-                // Create the new page and update the global map of pages
-                let page = Arc::new(Page {
+            .entry(*pid)
+            .or_insert_with(|| {
+                Arc::new(Page {
                     pid: *pid,
                     is_loaded: AtomicBool::new(false),
                     frame: RwLock::new(None),
-                });
-
-                pages_guard.insert(*pid, page.clone());
-                page
-            }
-        };
+                })
+            })
+            .get()
+            .clone();
 
         Ok(PageHandle::new(page, sm))
     }
