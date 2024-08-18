@@ -96,15 +96,14 @@ impl<'a> WritePageGuard<'a> {
     ///
     /// This function will return an error if it is unable to complete the write operation to a
     /// file.
-    #[allow(clippy::missing_panics_doc)]
     pub async fn flush(&mut self) -> Result<()> {
         debug_assert!(self.guard.is_some());
 
         // Temporarily take ownership of the frame from the guard.
-        let frame = self
-            .guard
-            .take()
-            .expect("WritePageGuard somehow had no Frame");
+        let frame = match self.guard.take() {
+            Some(frame) => frame,
+            None => unreachable!("WritePageGuard somehow had no Frame"),
+        };
 
         // Write the data out to persistent storage.
         let (res, frame) = StorageManager::get()
