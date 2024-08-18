@@ -7,7 +7,7 @@ use crate::{
     storage::{Frame, FrameGroup, StorageManager, FRAME_GROUP_SIZE},
 };
 use rand::prelude::*;
-use scc::hash_map::HashMap;
+use scc::HashMap;
 use std::sync::{atomic::AtomicBool, Arc, OnceLock};
 use std::{future::Future, io::Result};
 use tokio::sync::RwLock;
