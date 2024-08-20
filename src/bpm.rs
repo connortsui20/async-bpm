@@ -1,4 +1,5 @@
-use crate::{frame::Frame, page::PageHandle, replacer::Replacer};
+use crate::page::{PageId, PAGE_SIZE};
+use crate::{page::PageHandle, replacer::Replacer, storage::Frame};
 use async_channel::{Receiver, Sender};
 use scc::Queue;
 use std::{collections::HashMap, io::Result};
@@ -10,10 +11,6 @@ use std::{
     },
 };
 use tokio::sync::{Mutex, RwLock, RwLockWriteGuard};
-
-pub const PAGE_SIZE: usize = 1 << 12; // 4096
-
-pub type PageId = usize;
 
 pub struct BufferPoolManager<R> {
     pub(crate) pages: Mutex<HashMap<PageId, Arc<RwLock<Option<Frame>>>>>,

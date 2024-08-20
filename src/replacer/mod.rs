@@ -1,4 +1,4 @@
-use crate::PageId;
+use crate::page::PageId;
 
 pub enum AccessType {
     Lookup,

@@ -1,13 +1,17 @@
 //! TODO Wrappers around `tokio`'s `RwLockReadGuard` and `RwLockWriteGuard`, dedicated for pages of
 //! data.
 
-use crate::frame::Frame;
 use crate::replacer::{AccessType, Replacer};
-use crate::{BufferPoolManager, PageId};
+use crate::storage::Frame;
+use crate::BufferPoolManager;
 use std::io::Result;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+
+pub const PAGE_SIZE: usize = 1 << 12; // 4096
+
+pub type PageId = usize;
 
 #[derive(Clone)]
 pub struct PageHandle<R: Replacer> {

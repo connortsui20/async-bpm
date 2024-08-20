@@ -1,5 +1,5 @@
 mod bpm;
-mod frame;
+mod storage;
 mod page;
 mod replacer;
 
