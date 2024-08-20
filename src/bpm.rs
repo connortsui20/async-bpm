@@ -62,14 +62,19 @@ impl<R: Replacer> BufferPoolManager<R> {
         }
     }
 
-    async fn allocate_page(&self) -> PageId {
+    pub async fn new_page(self: Arc<Self>) -> Result<PageHandle<R>> {
+        let pid = self.allocate_page().await;
+        Self::get_page(self, pid).await
+    }
+
+    pub async fn allocate_page(&self) -> PageId {
         match self.free_pages.pop().map(|e| **e) {
             Some(page) => page,
             None => self.next_page.fetch_add(1, Ordering::AcqRel),
         }
     }
 
-    async fn deallocate_page(&self, pid: PageId) -> Result<()> {
+    pub async fn deallocate_page(&self, pid: PageId) -> Result<()> {
         // TODO
         let mut guard = self.pages.lock().await;
 
@@ -106,11 +111,6 @@ impl<R: Replacer> BufferPoolManager<R> {
         self.free_pages.push(pid);
 
         Ok(())
-    }
-
-    pub async fn new_page(self: Arc<Self>) -> Result<PageHandle<R>> {
-        let pid = self.allocate_page().await;
-        Self::get_page(self, pid).await
     }
 
     /// Gets a PageHandle by bringing the page data into memory and pinning it.
