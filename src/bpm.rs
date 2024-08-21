@@ -164,11 +164,11 @@ impl<R: Replacer> BufferPoolManager<R> {
                 Some(frame) => frame,
             };
 
-            let (res, frame) = StorageManager::get()
-                .create_handle()?
-                .write_from(pid, frame)
-                .await;
-            res?;
+            // let (res, frame) = StorageManager::get()
+            //     .create_handle()?
+            //     .write_from(pid, frame)
+            //     .await;
+            // res?;
 
             if self.free_list.0.send(frame).await.is_err() {
                 unreachable!("Free list cannot become full")

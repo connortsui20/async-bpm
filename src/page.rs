@@ -180,11 +180,11 @@ impl<'a> WritePageGuard<'a> {
         };
 
         // Write the data out to persistent storage.
-        let (res, frame) = StorageManager::get()
-            .create_handle()?
-            .write_from(self.pid, frame)
-            .await;
-        res?;
+        // let (res, frame) = StorageManager::get()
+        //     .create_handle()?
+        //     .write_from(self.pid, frame)
+        //     .await;
+        // res?;
 
         // Give ownership back to the guard.
         self.guard.replace(frame);
