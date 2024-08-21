@@ -31,4 +31,8 @@ pub trait Replacer {
     fn size(&self) -> usize;
 }
 
-pub mod clock;
+// pub mod clock;
+// pub use clock::*;
+
+pub mod fifo;
+pub use fifo::*;

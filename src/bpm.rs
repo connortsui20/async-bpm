@@ -14,6 +14,8 @@ use std::{
 };
 use tokio::sync::{RwLock, RwLockWriteGuard};
 
+/// Invariant: While a thread holds the page table lock, it is not allowed to acquire any other
+/// visible locks.
 pub struct BufferPoolManager<R> {
     pub(crate) pages: Mutex<HashMap<PageId, Arc<RwLock<Option<Frame>>>>>,
 
@@ -69,16 +71,16 @@ impl<R: Replacer> BufferPoolManager<R> {
         }
     }
 
-    pub async fn new_page(self: Arc<Self>) -> Result<PageHandle<R>> {
-        let pid = self.allocate_page().await;
-        Self::get_page(self, pid).await
-    }
-
-    pub async fn allocate_page(&self) -> PageId {
+    pub fn allocate_page(&self) -> PageId {
         match self.free_pages.pop().map(|e| **e) {
             Some(page) => page,
             None => self.next_page.fetch_add(1, Ordering::AcqRel),
         }
+    }
+
+    pub async fn new_page(self: Arc<Self>) -> Result<PageHandle<R>> {
+        let pid = self.allocate_page();
+        Self::get_page(self, pid).await
     }
 
     pub async fn evict_page(&self, pid: PageId) -> Result<()> {
