@@ -83,7 +83,7 @@ impl<R: Replacer> BufferPoolManager<R> {
     }
 
     /// Gets a PageHandle by bringing the page data into memory and pinning it.
-    pub async fn get_page(self: Arc<Self>, pid: &PageId) -> Result<PageHandle<R>> {
+    pub async fn get_page(&self: Arc<Self>, pid: &PageId) -> Result<PageHandle<R>> {
         let pid = *pid;
 
         let handle = {
