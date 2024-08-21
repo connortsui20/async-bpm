@@ -1,7 +1,7 @@
 mod bpm;
-mod page;
 mod storage;
 
+pub mod page;
 pub mod replacer;
 
 pub use bpm::*;

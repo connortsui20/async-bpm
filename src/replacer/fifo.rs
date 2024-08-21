@@ -1,10 +1,13 @@
 use super::*;
 use crate::page::PageId;
-use std::sync::Mutex;
+use std::{collections::HashMap, sync::Mutex};
 
 struct FifoInner {
+    /// A queue of unpinned pages.
     queue: Vec<usize>,
-    pinned: Vec<usize>,
+
+    /// A map of pinned pages and their pin counts.
+    pinned: HashMap<usize, usize>,
 }
 
 pub struct Fifo {
@@ -15,8 +18,8 @@ impl Replacer for Fifo {
     fn new(num_frames: usize) -> Self {
         Self {
             inner: Mutex::new(FifoInner {
-                queue: Vec::with_capacity(num_frames),
-                pinned: Vec::new(),
+                queue: Vec::with_capacity(2 * num_frames),
+                pinned: HashMap::new(),
             }),
         }
     }
@@ -24,44 +27,59 @@ impl Replacer for Fifo {
     fn pin(&self, pid: PageId) -> Result<usize, FrameNotFound> {
         let mut guard = self.inner.lock().expect("Lock was somehow poisoned");
 
+        // If the page is unpinned it will be in the queue, so remove it.
         if let Some(index) = guard.queue.iter().position(|&x| x == pid) {
             guard.queue.remove(index);
-            guard.pinned.push(index);
+            assert!(guard.pinned.insert(pid, 1).is_none());
             return Ok(1);
         }
 
-        if guard.pinned.iter().any(|&x| x == pid) {
-            return Ok(1);
+        // Otherwise, it is already pinned so increment the pin count.
+        match guard.pinned.get_mut(&pid) {
+            Some(count) => {
+                *count += 1;
+                Ok(*count)
+            }
+            None => Err(FrameNotFound),
         }
-
-        Err(FrameNotFound)
     }
 
     fn unpin(&self, pid: PageId) -> Result<usize, FrameNotFound> {
         let mut guard = self.inner.lock().expect("Lock was somehow poisoned");
 
+        // The the page is already unpinned then do nothing.
         if guard.queue.iter().any(|&x| x == pid) {
-            return Ok(1);
+            return Ok(0);
         }
 
-        if let Some(index) = guard.pinned.iter().position(|&x| x == pid) {
-            guard.pinned.remove(index);
-            guard.queue.push(index);
+        // Otherwise, it is already pinned so decrement the pin count.
+        let Some(count) = guard.pinned.get_mut(&pid) else {
+            return Err(FrameNotFound);
+        };
+
+        *count -= 1;
+        let count = *count;
+
+        // If the pin count has hit zero, add the page to the queue.
+        if count == 0 {
+            assert!(guard.pinned.remove(&pid).is_some());
+            guard.queue.push(pid);
         }
 
-        Err(FrameNotFound)
+        Ok(count)
     }
 
     fn record_access(&self, pid: PageId, _access: AccessType) -> Result<(), FrameNotFound> {
         let mut guard = self.inner.lock().expect("Lock was somehow poisoned");
 
+        // Find the page in the queue and move it to the back.
         if let Some(index) = guard.queue.iter().position(|&x| x == pid) {
             guard.queue.remove(index);
             guard.queue.push(index);
             return Ok(());
         }
 
-        if guard.pinned.iter().any(|&x| x == pid) {
+        if guard.pinned.iter().any(|(&x, _)| x == pid) {
             return Ok(());
         }
 
@@ -71,7 +89,7 @@ impl Replacer for Fifo {
     fn add(&self, pid: PageId) {
         let mut guard = self.inner.lock().expect("Lock was somehow poisoned");
 
-        guard.pinned.push(pid);
+        assert!(guard.pinned.insert(pid, 1).is_none());
     }
 
     fn evict(&self) -> Option<PageId> {
@@ -92,12 +110,10 @@ impl Replacer for Fifo {
             return Ok(());
         }
 
-        if let Some(index) = guard.pinned.iter().position(|&x| x == pid) {
-            guard.queue.remove(index);
-            return Ok(());
+        match guard.pinned.remove(&pid) {
+            Some(_) => Ok(()),
+            None => Err(FrameNotFound),
         }
-
-        Err(FrameNotFound)
     }
 
     fn size(&self) -> usize {

@@ -2,7 +2,7 @@
 //! data.
 
 use crate::replacer::{AccessType, Replacer};
-use crate::storage::Frame;
+use crate::storage::{Frame, StorageManager};
 use crate::BufferPoolManager;
 use std::io::Result;
 use std::ops::{Deref, DerefMut};
@@ -36,7 +36,7 @@ impl<R: Replacer> PageHandle<R> {
         }
     }
 
-    pub async fn read_page(&self) -> ReadPageGuard {
+    pub async fn read(&self) -> ReadPageGuard {
         let read_guard = self.frame.read().await;
 
         match read_guard.deref() {
@@ -46,12 +46,14 @@ impl<R: Replacer> PageHandle<R> {
                     .replacer
                     .record_access(frame.id(), AccessType::Unknown)
                     .expect("TODO");
+
+                self.bpm.replacer.pin(self.pid).expect("TODO");
                 ReadPageGuard::new(self.pid, read_guard)
             }
         }
     }
 
-    pub async fn write_page(&self) -> WritePageGuard {
+    pub async fn write(&self) -> WritePageGuard {
         let write_guard = self.frame.write().await;
 
         match write_guard.deref() {
@@ -61,6 +63,7 @@ impl<R: Replacer> PageHandle<R> {
                     .replacer
                     .record_access(frame.id(), AccessType::Unknown)
                     .expect("TODO");
+                self.bpm.replacer.pin(self.pid).expect("TODO");
                 WritePageGuard::new(self.pid, write_guard)
             }
         }
@@ -74,11 +77,7 @@ impl<R: Replacer> Drop for PageHandle<R> {
             Ok(count) => count,
         };
 
-        debug_assert_eq!(pin_count, Arc::strong_count(&self.frame));
-
-        if Arc::strong_count(&self.frame) == 1 {
-            todo!()
-        }
+        debug_assert_eq!(pin_count + 1, Arc::strong_count(&self.frame));
     }
 }
 
@@ -136,6 +135,9 @@ impl<'a> Deref for ReadPageGuard<'a> {
 /// This guard can be dereferenced in both read and write mode, and no other tasks or threads can
 /// access the page's data while a task has this guard.
 pub struct WritePageGuard<'a> {
+    /// The unique page ID of the page this guard read protects.
+    pid: PageId,
+
     /// The `RwLock` write guard of the optional frame, that _must_ be the [`Some`] variant.
     ///
     /// The only reason that this guard protects an `Option<Frame>` instead of just a [`Frame`] is
@@ -161,7 +163,7 @@ impl<'a> WritePageGuard<'a> {
             pid
         );
 
-        Self { guard }
+        Self { pid, guard }
     }
 
     /// Flushes a page's data out to persistent storage.
@@ -173,7 +175,23 @@ impl<'a> WritePageGuard<'a> {
     pub async fn flush(&mut self) -> Result<()> {
         debug_assert!(self.guard.is_some());
 
-        todo!()
+        // Temporarily take ownership of the frame from the guard.
+        let frame = match self.guard.take() {
+            Some(frame) => frame,
+            None => unreachable!("WritePageGuard somehow had no Frame"),
+        };
+
+        // Write the data out to persistent storage.
+        let (res, frame) = StorageManager::get()
+            .create_handle()?
+            .write_from(self.pid, frame)
+            .await;
+        res?;
+
+        // Give ownership back to the guard.
+        self.guard.replace(frame);
+
+        Ok(())
     }
 }
 

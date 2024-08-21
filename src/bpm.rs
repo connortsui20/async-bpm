@@ -3,6 +3,7 @@ use crate::storage::StorageManager;
 use crate::{page::PageHandle, replacer::Replacer, storage::Frame};
 use async_channel::{Receiver, Sender};
 use scc::Queue;
+use std::future::Future;
 use std::sync::Mutex;
 use std::{collections::HashMap, io::Result};
 use std::{
@@ -13,6 +14,7 @@ use std::{
     },
 };
 use tokio::sync::{RwLock, RwLockWriteGuard};
+use tokio::task;
 
 /// Invariant: While a thread holds the page table lock, it is not allowed to acquire any other
 /// visible locks.
@@ -26,8 +28,6 @@ pub struct BufferPoolManager<R> {
     pub(crate) free_pages: Queue<PageId>,
 
     pub(crate) next_page: AtomicUsize,
-
-    pub(crate) sm: StorageManager,
 }
 
 impl<R: Replacer> BufferPoolManager<R> {
@@ -59,7 +59,7 @@ impl<R: Replacer> BufferPoolManager<R> {
 
         let next_page = AtomicUsize::new(0);
 
-        let sm = StorageManager::new(capacity);
+        StorageManager::initialize(capacity);
 
         Self {
             pages,
@@ -67,7 +67,6 @@ impl<R: Replacer> BufferPoolManager<R> {
             replacer,
             free_pages,
             next_page,
-            sm,
         }
     }
 
@@ -80,7 +79,109 @@ impl<R: Replacer> BufferPoolManager<R> {
 
     pub async fn new_page(self: Arc<Self>) -> Result<PageHandle<R>> {
         let pid = self.allocate_page();
-        Self::get_page(self, pid).await
+        Self::get_page(self, &pid).await
+    }
+
+    /// Gets a PageHandle by bringing the page data into memory and pinning it.
+    pub async fn get_page(self: Arc<Self>, pid: &PageId) -> Result<PageHandle<R>> {
+        let pid = *pid;
+
+        let handle = {
+            let mut guard = self.pages.lock().expect("Lock was somehow poisoned");
+
+            guard
+                .entry(pid)
+                .or_insert_with(|| Arc::new(RwLock::new(None)))
+                .clone()
+        };
+
+        let mut write_guard = handle.write().await;
+
+        if let Some(frame) = write_guard.deref() {
+            return Ok(PageHandle::new(
+                pid,
+                frame.id(),
+                handle.clone(),
+                self.clone(),
+            ));
+        }
+
+        self.load(pid, &mut write_guard).await?;
+
+        match write_guard.deref() {
+            None => unreachable!("We just loaded in a Frame"),
+            Some(frame) => Ok(PageHandle::new(
+                pid,
+                frame.id(),
+                handle.clone(),
+                self.clone(),
+            )),
+        }
+    }
+
+    async fn load(
+        &self,
+        pid: PageId,
+        guard: &mut RwLockWriteGuard<'_, Option<Frame>>,
+    ) -> Result<()> {
+        // If someone else got in front of us and loaded the page for us.
+        if guard.deref().deref().is_some() {
+            return Ok(());
+        }
+
+        let frame = self.get_free_frame().await?;
+
+        let sm = StorageManager::get();
+        let smh = sm.create_handle()?;
+        let (res, frame) = smh.read_into(pid, frame).await;
+        res?;
+
+        self.replacer.add(frame.id());
+
+        // Give ownership of the frame to the actual page.
+        let old: Option<Frame> = guard.replace(frame);
+        debug_assert!(old.is_none());
+
+        Ok(())
+    }
+
+    async fn get_free_frame(&self) -> Result<Frame> {
+        loop {
+            if let Ok(frame) = self.free_list.1.try_recv() {
+                return Ok(frame);
+            }
+
+            let Some(pid) = self.replacer.evict() else {
+                // TODO Use a condition variable.
+                todo!("Wait for a free frame");
+            };
+
+            let frame_handle = {
+                let guard = self.pages.lock().expect("Lock was somehow poisoned");
+
+                let Some(handle) = guard.get(&pid) else {
+                    unreachable!("Page in replacer was somehow not in the page table");
+                };
+
+                handle.clone()
+            };
+
+            let mut write_guard = frame_handle.write().await;
+
+            let frame = match write_guard.take() {
+                None => unreachable!("Page somehow had no frame"),
+                Some(frame) => frame,
+            };
+
+            let sm = StorageManager::get();
+            let smh = sm.create_handle()?;
+            let (res, frame) = smh.write_from(pid, frame).await;
+            res?;
+
+            if self.free_list.0.send(frame).await.is_err() {
+                unreachable!("Free list cannot become full")
+            }
+        }
     }
 
     pub async fn evict_page(&self, pid: PageId) -> Result<()> {
@@ -129,101 +230,23 @@ impl<R: Replacer> BufferPoolManager<R> {
         Ok(())
     }
 
-    /// Gets a PageHandle by bringing the page data into memory and pinning it.
-    pub async fn get_page(self: Arc<Self>, pid: PageId) -> Result<PageHandle<R>> {
-        let handle = {
-            let mut guard = self.pages.lock().expect("Lock was somehow poisoned");
-
-            guard
-                .entry(pid)
-                .or_insert_with(|| Arc::new(RwLock::new(None)))
-                .clone()
-        };
-
-        let mut write_guard = handle.write().await;
-
-        if let Some(frame) = write_guard.deref() {
-            return Ok(PageHandle::new(
-                pid,
-                frame.id(),
-                handle.clone(),
-                self.clone(),
-            ));
-        }
-
-        self.load(pid, &mut write_guard).await?;
-
-        match write_guard.deref() {
-            None => unreachable!("We just loaded in a Frame"),
-            Some(frame) => Ok(PageHandle::new(
-                pid,
-                frame.id(),
-                handle.clone(),
-                self.clone(),
-            )),
-        }
+    /// Starts a [`tokio_uring`] runtime on a single thread that runs the given [`Future`].
+    ///
+    /// TODO more docs
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if it is unable to spawn the eviction task for some reason.
+    pub fn start_thread<F: Future>(future: F) -> F::Output {
+        tokio_uring::start(future)
     }
 
-    async fn load(
-        &self,
-        pid: PageId,
-        guard: &mut RwLockWriteGuard<'_, Option<Frame>>,
-    ) -> Result<()> {
-        // If someone else got in front of us and loaded the page for us.
-        if guard.deref().deref().is_some() {
-            return Ok(());
-        }
-
-        let frame = self.get_free_frame().await?;
-
-        let smh = self.sm.create_handle()?;
-        let (res, frame) = smh.read_into(pid, frame).await;
-        res?;
-
-        self.replacer.add(frame.id());
-
-        // Give ownership of the frame to the actual page.
-        let old: Option<Frame> = guard.replace(frame);
-        debug_assert!(old.is_none());
-
-        Ok(())
-    }
-
-    async fn get_free_frame(&self) -> Result<Frame> {
-        loop {
-            if let Ok(frame) = self.free_list.1.try_recv() {
-                return Ok(frame);
-            }
-
-            let Some(pid) = self.replacer.evict() else {
-                // TODO Use a condition variable.
-                todo!("Wait for a free frame");
-            };
-
-            let frame_handle = {
-                let guard = self.pages.lock().expect("Lock was somehow poisoned");
-
-                let Some(handle) = guard.get(&pid) else {
-                    unreachable!("Page in replacer was somehow not in the page table");
-                };
-
-                handle.clone()
-            };
-
-            let mut write_guard = frame_handle.write().await;
-
-            let frame = match write_guard.take() {
-                None => unreachable!("Page somehow had no frame"),
-                Some(frame) => frame,
-            };
-
-            let smh = self.sm.create_handle()?;
-            let (res, frame) = smh.write_from(pid, frame).await;
-            res?;
-
-            if self.free_list.0.send(frame).await.is_err() {
-                unreachable!("Free list cannot become full")
-            }
-        }
+    /// Spawns a thread-local task on the current thread.
+    ///
+    /// Note that the caller must `.await` the return of this function in order to run the future.
+    ///
+    /// TODO docs
+    pub fn spawn_local<T: Future + 'static>(task: T) -> task::JoinHandle<T::Output> {
+        tokio_uring::spawn(task)
     }
 }

@@ -15,12 +15,16 @@ use send_wrapper::SendWrapper;
 use std::io::Result;
 use std::ops::Deref;
 use std::rc::Rc;
+use std::sync::OnceLock;
 use thread_local::ThreadLocal;
 use tokio_uring::fs::File;
 use tokio_uring::BufResult;
 
 /// TODO refactor this out
 pub const DATABASE_NAME: &str = "test.db";
+
+/// The global storage manager instance.
+pub(crate) static STORAGE_MANAGER: OnceLock<StorageManager> = OnceLock::new();
 
 /// Manages reads into and writes from `Frame`s between memory and persistent storage.
 #[derive(Debug)]
@@ -35,7 +39,7 @@ impl StorageManager {
     /// # Panics
     ///
     /// Panics on I/O errors, or if this function is called a second time after a successful return.
-    pub(crate) fn new(capacity: usize) -> Self {
+    pub(crate) fn initialize(capacity: usize) {
         tokio_uring::start(async {
             let _ = tokio_uring::fs::remove_file(DATABASE_NAME).await;
 
@@ -48,9 +52,24 @@ impl StorageManager {
         })
         .expect("I/O error on initialization");
 
-        Self {
+        let sm = Self {
             file: ThreadLocal::new(),
-        }
+        };
+
+        STORAGE_MANAGER
+            .set(sm)
+            .expect("Tried to set the global storage manager more than once");
+    }
+
+    /// Retrieve a static reference to the global storage manager.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if it is called before a call to [`StorageManager::initialize`].
+    pub(crate) fn get() -> &'static Self {
+        STORAGE_MANAGER
+            .get()
+            .expect("Tried to get a reference to the storage manager before it was initialized")
     }
 
     /// Creates a thread-local [`StorageManagerHandle`] that has a reference back to this storage
