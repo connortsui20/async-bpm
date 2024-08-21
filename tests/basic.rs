@@ -24,7 +24,7 @@ fn test_single_thread() {
 #[test]
 #[ignore]
 fn test_basic() {
-    const THREADS: usize = 6;
+    const THREADS: usize = 8;
 
     let bpm = BufferPoolManager::<Fifo>::new(64, 128);
     let bpm = Arc::new(bpm);

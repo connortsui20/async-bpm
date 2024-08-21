@@ -7,12 +7,12 @@ edition = "2021"
 
 [dependencies]
 async-channel = "2.3"
-libc = "0.2.158"
+libc = "0.2"
 scc = "2.1"
-send_wrapper = "0.6.0"
-thread_local = "1.1.8"
+send_wrapper = "0.6"
+thread_local = "1.1"
 tokio = { version = "1.39", features = ["macros", "rt", "sync", "time"] }
-tokio-uring = "0.5.0"
+tokio-uring = "0.5"
 
 [dev-dependencies]
 tokio = { version = "1.39", features = ["full"] }
