@@ -57,16 +57,21 @@ impl Replacer for Fifo {
             return Err(FrameNotFound);
         };
 
-        *count -= 1;
-        let count = *count;
+        debug_assert_ne!(*count, 0);
 
-        // If the pin count has hit zero, add the page to the queue.
-        if count == 0 {
-            assert!(guard.pinned.remove(&pid).is_some());
-            guard.queue.push(pid);
+        if *count > 1 {
+            *count -= 1;
+            return Ok(*count);
         }
 
-        Ok(count)
+        let count = *count;
+        debug_assert_eq!(count, 1);
+
+        // If the pin count has hit zero, add the page to the queue.
+        assert!(guard.pinned.remove(&pid).is_some());
+        guard.queue.push(pid);
+
+        Ok(0)
     }
 
     fn record_access(&self, pid: PageId, _access: AccessType) -> Result<(), FrameNotFound> {
@@ -79,6 +84,7 @@ impl Replacer for Fifo {
             return Ok(());
         }
 
+        // Recording access does not mean modifying the pin count.
         if guard.pinned.iter().any(|(&x, _)| x == pid) {
             return Ok(());
         }
@@ -89,7 +95,7 @@ impl Replacer for Fifo {
     fn add(&self, pid: PageId) {
         let mut guard = self.inner.lock().expect("Lock was somehow poisoned");
 
-        assert!(guard.pinned.insert(pid, 1).is_none());
+        assert!(guard.pinned.insert(pid, 0).is_none());
     }
 
     fn evict(&self) -> Option<PageId> {

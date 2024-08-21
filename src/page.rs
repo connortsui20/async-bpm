@@ -16,7 +16,6 @@ pub type PageId = usize;
 #[derive(Clone)]
 pub struct PageHandle<R: Replacer> {
     pid: PageId,
-    frame_id: usize,
     frame: Arc<RwLock<Option<Frame>>>,
     bpm: Arc<BufferPoolManager<R>>,
 }
@@ -24,16 +23,15 @@ pub struct PageHandle<R: Replacer> {
 impl<R: Replacer> PageHandle<R> {
     pub(crate) fn new(
         pid: PageId,
-        frame_id: usize,
         frame: Arc<RwLock<Option<Frame>>>,
         bpm: Arc<BufferPoolManager<R>>,
     ) -> Self {
-        Self {
-            pid,
-            frame_id,
-            frame,
-            bpm,
-        }
+        let pin_count = bpm.replacer.pin(pid).expect("TODO");
+
+        // 1 extra for the handle stored in the page table, and 1 extra for the one we are dropping.
+        debug_assert_eq!(pin_count + 2, Arc::strong_count(&frame));
+
+        Self { pid, frame, bpm }
     }
 
     pub async fn read(&self) -> ReadPageGuard {
@@ -41,13 +39,12 @@ impl<R: Replacer> PageHandle<R> {
 
         match read_guard.deref() {
             None => unreachable!("PageHandle somehow had no frame"),
-            Some(frame) => {
+            Some(_) => {
                 self.bpm
                     .replacer
-                    .record_access(frame.id(), AccessType::Unknown)
+                    .record_access(self.pid, AccessType::Unknown)
                     .expect("TODO");
 
-                self.bpm.replacer.pin(self.pid).expect("TODO");
                 ReadPageGuard::new(self.pid, read_guard)
             }
         }
@@ -58,12 +55,12 @@ impl<R: Replacer> PageHandle<R> {
 
         match write_guard.deref() {
             None => unreachable!("PageHandle somehow had no frame"),
-            Some(frame) => {
+            Some(_) => {
                 self.bpm
                     .replacer
-                    .record_access(frame.id(), AccessType::Unknown)
+                    .record_access(self.pid, AccessType::Unknown)
                     .expect("TODO");
-                self.bpm.replacer.pin(self.pid).expect("TODO");
+
                 WritePageGuard::new(self.pid, write_guard)
             }
         }
@@ -72,12 +69,13 @@ impl<R: Replacer> PageHandle<R> {
 
 impl<R: Replacer> Drop for PageHandle<R> {
     fn drop(&mut self) {
-        let pin_count = match self.bpm.replacer.unpin(self.frame_id) {
+        let pin_count = match self.bpm.replacer.unpin(self.pid) {
             Err(_) => unreachable!("The frame must be present since we have a page handle"),
             Ok(count) => count,
         };
 
-        debug_assert_eq!(pin_count + 1, Arc::strong_count(&self.frame));
+        // 1 extra for the handle stored in the page table, and 1 extra for the one we are dropping.
+        debug_assert_eq!(pin_count + 2, Arc::strong_count(&self.frame));
     }
 }
 

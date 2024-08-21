@@ -34,11 +34,13 @@ fn test_basic() {
         for i in 0..THREADS {
             let bpm = bpm.clone();
             s.spawn(move || {
-                let bpm = bpm.clone();
                 BufferPoolManager::<Fifo>::start_thread(async move {
+                    let bpm1 = bpm.clone();
+                    let bpm2 = bpm.clone();
+
                     let h1 = BufferPoolManager::<Fifo>::spawn_local(async move {
                         let pid = 2 * i;
-                        let ph = bpm.get_page(&pid).await.unwrap();
+                        let ph = bpm1.get_page(&pid).await.unwrap();
 
                         {
                             let mut guard = ph.write().await;
@@ -49,7 +51,7 @@ fn test_basic() {
 
                     let h2 = BufferPoolManager::<Fifo>::spawn_local(async move {
                         let pid = (2 * i) + 1;
-                        let ph = bpm.get_page(&pid).await.unwrap();
+                        let ph = bpm2.get_page(&pid).await.unwrap();
 
                         {
                             let mut guard: async_bpm::page::WritePageGuard = ph.write().await;

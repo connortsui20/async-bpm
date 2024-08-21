@@ -83,7 +83,7 @@ impl<R: Replacer> BufferPoolManager<R> {
     }
 
     /// Gets a PageHandle by bringing the page data into memory and pinning it.
-    pub async fn get_page(&self: Arc<Self>, pid: &PageId) -> Result<PageHandle<R>> {
+    pub async fn get_page(self: Arc<Self>, pid: &PageId) -> Result<PageHandle<R>> {
         let pid = *pid;
 
         let handle = {
@@ -97,25 +97,15 @@ impl<R: Replacer> BufferPoolManager<R> {
 
         let mut write_guard = handle.write().await;
 
-        if let Some(frame) = write_guard.deref() {
-            return Ok(PageHandle::new(
-                pid,
-                frame.id(),
-                handle.clone(),
-                self.clone(),
-            ));
+        if write_guard.deref().is_some() {
+            return Ok(PageHandle::new(pid, handle.clone(), self.clone()));
         }
 
         self.load(pid, &mut write_guard).await?;
 
         match write_guard.deref() {
             None => unreachable!("We just loaded in a Frame"),
-            Some(frame) => Ok(PageHandle::new(
-                pid,
-                frame.id(),
-                handle.clone(),
-                self.clone(),
-            )),
+            Some(_) => Ok(PageHandle::new(pid, handle.clone(), self.clone())),
         }
     }
 
@@ -131,12 +121,13 @@ impl<R: Replacer> BufferPoolManager<R> {
 
         let frame = self.get_free_frame().await?;
 
-        let sm = StorageManager::get();
-        let smh = sm.create_handle()?;
-        let (res, frame) = smh.read_into(pid, frame).await;
+        let (res, frame) = StorageManager::get()
+            .create_handle()?
+            .read_into(pid, frame)
+            .await;
         res?;
 
-        self.replacer.add(frame.id());
+        self.replacer.add(pid);
 
         // Give ownership of the frame to the actual page.
         let old: Option<Frame> = guard.replace(frame);
@@ -173,9 +164,10 @@ impl<R: Replacer> BufferPoolManager<R> {
                 Some(frame) => frame,
             };
 
-            let sm = StorageManager::get();
-            let smh = sm.create_handle()?;
-            let (res, frame) = smh.write_from(pid, frame).await;
+            let (res, frame) = StorageManager::get()
+                .create_handle()?
+                .write_from(pid, frame)
+                .await;
             res?;
 
             if self.free_list.0.send(frame).await.is_err() {
