@@ -1,5 +1,7 @@
 # Asynchronous Buffer Pool Manager
 
+Authors: Connor Tsui, Sarvesh Tandon, Kyle Booker
+
 An asynchronous buffer pool manager, built on top of [`tokio_uring`] and [`tokio`].
 
 The goal of this buffer pool manager is to exploit parallelism as much as possible by eliminating
