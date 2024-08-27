@@ -22,7 +22,7 @@ use zipf::ZipfDistribution;
 const GIGABYTE: usize = 1024 * 1024 * 1024;
 const GIGABYTE_PAGES: usize = GIGABYTE / PAGE_SIZE;
 
-const THREADS: usize = 4;
+const THREADS: usize = 8;
 const TASKS: usize = 128; // tasks per thread
 const OPERATIONS: usize = 1 << 24;
 

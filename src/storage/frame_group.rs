@@ -149,9 +149,15 @@ impl FrameGroup {
                     .evict_page_owner()
                     .expect("Tried to evict a frame that had no page owner");
 
-                // Write the data out to persistent storage.
-                let (res, frame) = sm.write_from(page.pid, frame).await;
-                res?;
+                if frame.is_dirty() {
+                    // Write the data out to persistent storage.
+                    let (res, mut empty_frame) = sm.write_from(page.pid, frame).await;
+                    res?;
+
+                    empty_frame.clear_dirty();
+
+                    frame = empty_frame;
+                }
 
                 self.free_list.0.send(frame).await.unwrap();
                 self.num_free_frames.fetch_add(1, Ordering::Release);

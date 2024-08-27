@@ -81,11 +81,11 @@ impl<'a> WritePageGuard<'a> {
     ///
     /// This function will panic if the `RwLockWriteGuard` holds a `None` instead of a
     /// `Some(frame)`, since we cannot have a page guard that points to nothing.
-    pub(crate) fn new(pid: PageId, guard: RwLockWriteGuard<'a, Option<Frame>>) -> Self {
-        assert!(
-            guard.is_some(),
-            "Cannot create a WritePageGuard that does not own a Frame"
-        );
+    pub(crate) fn new(pid: PageId, mut guard: RwLockWriteGuard<'a, Option<Frame>>) -> Self {
+        match guard.as_mut() {
+            Some(frame) => frame.set_dirty(),
+            None => unreachable!("Cannot create a WritePageGuard that does not own a Frame"),
+        }
 
         Self { pid, guard }
     }
@@ -97,8 +97,6 @@ impl<'a> WritePageGuard<'a> {
     /// This function will return an error if it is unable to complete the write operation to a
     /// file.
     pub async fn flush(&mut self) -> Result<()> {
-        debug_assert!(self.guard.is_some());
-
         // Temporarily take ownership of the frame from the guard.
         let frame = match self.guard.take() {
             Some(frame) => frame,
@@ -106,11 +104,13 @@ impl<'a> WritePageGuard<'a> {
         };
 
         // Write the data out to persistent storage.
-        let (res, frame) = StorageManager::get()
+        let (res, mut frame) = StorageManager::get()
             .create_handle()?
             .write_from(self.pid, frame)
             .await;
         res?;
+
+        frame.clear_dirty();
 
         // Give ownership back to the guard.
         self.guard.replace(frame);

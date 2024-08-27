@@ -29,6 +29,13 @@ pub(crate) struct Frame {
     /// [`replace_page_owner`](Self::replace_page_owner).
     page_owner: Option<Arc<Page>>,
 
+    /// A flag representing if the `Frame` is dirty or not.
+    ///
+    /// If we never modify a [`Page`] that the `Frame` holds, then we don't need to worry about
+    /// writing out updates to storage. With this flag, we only incur the I/O operation when
+    /// absolutely necessary.
+    dirty: bool,
+
     /// The buffer that this `Frame` holds ownership over.
     ///
     /// Since `Frame` is not [`Clone`]able, this `Frame` is guaranteed to have exclusive access to
@@ -44,6 +51,7 @@ impl Frame {
         Self {
             frame_id,
             buf,
+            dirty: false,
             page_owner: None,
         }
     }
@@ -84,6 +92,20 @@ impl Frame {
             .expect("Fatal: `EvictionState` lock was poisoned somehow");
 
         eviction_guard[index] = EvictionState::Hot(page.clone());
+    }
+
+    pub(crate) fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    /// Sets the dirty bit.
+    pub(crate) fn set_dirty(&mut self) {
+        self.dirty = true;
+    }
+
+    /// Clears the dirty bit.
+    pub(crate) fn clear_dirty(&mut self) {
+        self.dirty = false;
     }
 }
 
