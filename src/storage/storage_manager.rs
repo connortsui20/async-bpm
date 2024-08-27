@@ -11,11 +11,10 @@
 
 use crate::page::PAGE_SIZE;
 use crate::{page::PageId, storage::frame::Frame};
-use send_wrapper::SendWrapper;
 use std::io::Result;
 use std::ops::Deref;
+use std::sync::LazyLock;
 use std::{rc::Rc, sync::OnceLock};
-use thread_local::ThreadLocal;
 use tokio_uring::fs::File;
 use tokio_uring::BufResult;
 
@@ -25,12 +24,22 @@ pub const DATABASE_NAME: &str = "test.db";
 /// The global storage manager instance.
 pub(crate) static STORAGE_MANAGER: OnceLock<StorageManager> = OnceLock::new();
 
+std::thread_local! {
+    static DB_FILE: LazyLock<Rc<File>> = LazyLock::new(|| {
+        let std_file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(DATABASE_NAME)
+            .expect("Thread is unable to create a file handle");
+
+        let uring_file = tokio_uring::fs::File::from_std(std_file);
+        Rc::new(uring_file)
+    });
+}
+
 /// Manages reads into and writes from `Frame`s between memory and persistent storage.
 #[derive(Debug)]
-pub(crate) struct StorageManager {
-    /// TODO does this even make sense
-    file: ThreadLocal<SendWrapper<Rc<File>>>,
-}
+pub(crate) struct StorageManager;
 
 impl StorageManager {
     /// Creates a new shared [`StorageManager`] instance.
@@ -51,12 +60,8 @@ impl StorageManager {
         })
         .expect("I/O error on initialization");
 
-        let sm = Self {
-            file: ThreadLocal::new(),
-        };
-
         STORAGE_MANAGER
-            .set(sm)
+            .set(Self)
             .expect("Tried to set the global storage manager more than once");
     }
 
@@ -74,37 +79,29 @@ impl StorageManager {
     /// Creates a thread-local [`StorageManagerHandle`] that has a reference back to this storage
     /// manager.
     ///
-    /// TODO make this synchronous and blocking?
-    ///
     /// # Errors
     ///
     /// Returns an error if unable to create a [`File`] to the database files on disk.
     pub(crate) fn create_handle(&self) -> Result<StorageManagerHandle> {
-        let file = match self.file.get() {
-            Some(file) => file.deref().clone(),
-            None => {
-                let std_file = std::fs::OpenOptions::new()
-                    .read(true)
-                    .write(true)
-                    .open(DATABASE_NAME)?;
-
-                let uring_file = tokio_uring::fs::File::from_std(std_file);
-                let file = SendWrapper::new(Rc::new(uring_file));
-
-                self.file.get_or(move || file).deref().clone()
-            }
-        };
+        let file = DB_FILE.with(|f| f.deref().clone());
 
         Ok(StorageManagerHandle { file })
+    }
+
+    /// Retrieves the number of drives that the pages are stored on in persistent storage.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if it is called before a call to [`StorageManager::initialize`].
+    pub(crate) fn get_num_drives() -> usize {
+        1 // This buffer pool manager currently only supports 1 drive.
     }
 }
 
 /// A thread-local handle to a [`StorageManager`].
-///
-/// TODO this might not be named appropriately anymore
 #[derive(Debug, Clone)]
 pub(crate) struct StorageManagerHandle {
-    /// TODO does this even make sense
+    /// A shared pointer to the thread-local file handle.
     file: Rc<File>,
 }
 
@@ -123,9 +120,7 @@ impl StorageManagerHandle {
     /// On any sort of error, we still need to return the `Frame` back to the caller, so both the
     /// `Ok` and `Err` cases return the frame back.
     pub(crate) async fn read_into(&self, pid: PageId, frame: Frame) -> BufResult<(), Frame> {
-        self.file
-            .read_exact_at(frame, (pid * PAGE_SIZE) as u64)
-            .await
+        self.file.read_exact_at(frame, (pid * 4096) as u64).await
     }
 
     /// Writes a page's data on a `Frame` to persistent storage.
@@ -142,8 +137,6 @@ impl StorageManagerHandle {
     /// On any sort of error, we still need to return the `Frame` back to the caller, so both the
     /// `Ok` and `Err` cases return the frame back.
     pub(crate) async fn write_from(&self, pid: PageId, frame: Frame) -> BufResult<(), Frame> {
-        self.file
-            .write_all_at(frame, (pid * PAGE_SIZE) as u64)
-            .await
+        self.file.write_all_at(frame, (pid * 4096) as u64).await
     }
 }
