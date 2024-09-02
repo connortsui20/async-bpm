@@ -4,7 +4,7 @@ use crate::page::PageId;
 use crate::storage::{Frame, StorageManager};
 use std::io::Result;
 use std::ops::{Deref, DerefMut};
-use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{RwLockReadGuard, RwLockWriteGuard};
 
 /// A read guard for a [`Page`](super::Page)'s `Frame`, which pins the page's data in memory.
 ///
@@ -97,7 +97,7 @@ impl<'a> WritePageGuard<'a> {
     /// This function will return an error if it is unable to complete the write operation to a
     /// file.
     #[allow(clippy::missing_panics_doc)]
-    pub async fn flush(&mut self) -> Result<()> {
+    pub fn flush(&mut self) -> Result<()> {
         debug_assert!(self.guard.is_some());
 
         // Temporarily take ownership of the frame from the guard.
@@ -107,11 +107,9 @@ impl<'a> WritePageGuard<'a> {
             .expect("WritePageGuard somehow had no Frame");
 
         // Write the data out to persistent storage.
-        let (res, frame) = StorageManager::get()
+        let frame = StorageManager::get()
             .create_handle()?
-            .write_from(self.pid, frame)
-            .await;
-        res?;
+            .write_from(self.pid, frame);
 
         // Give ownership back to the guard.
         self.guard.replace(frame);

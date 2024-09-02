@@ -11,13 +11,15 @@
 
 use crate::page::PAGE_SIZE;
 use crate::{page::PageId, storage::frame::Frame};
+use libc;
 use send_wrapper::SendWrapper;
+use std::fs::File;
 use std::io::Result;
 use std::ops::Deref;
+use std::os::fd::AsRawFd;
+use std::os::unix::prelude::FileExt;
 use std::{rc::Rc, sync::OnceLock};
 use thread_local::ThreadLocal;
-use tokio_uring::fs::File;
-use tokio_uring::BufResult;
 
 /// TODO refactor this out
 pub const DATABASE_NAME: &str = "test.db";
@@ -39,17 +41,17 @@ impl StorageManager {
     ///
     /// Panics on I/O errors, or if this function is called a second time after a successful return.
     pub(crate) fn initialize(capacity: usize) {
-        tokio_uring::start(async {
-            let _ = tokio_uring::fs::remove_file(DATABASE_NAME).await;
+        let _ = std::fs::remove_file(DATABASE_NAME);
 
-            let file = File::create(DATABASE_NAME).await?;
-            file.fallocate(0, (capacity * PAGE_SIZE) as u64, libc::FALLOC_FL_ZERO_RANGE)
-                .await?;
+        let file = File::create(DATABASE_NAME).expect("Couldn't create file");
+        let fd = file.as_raw_fd();
 
-            file.close().await?;
-            Ok::<(), std::io::Error>(())
-        })
-        .expect("I/O error on initialization");
+        // file.fallocate(0, (capacity * PAGE_SIZE) as u64, 0);
+        // SAFETY: this is safe because its just s
+        unsafe {
+            // libc::fallocate(fd, 0, (capacity * PAGE_SIZE) as u64, 4096);
+            libc::ftruncate(fd, (capacity * PAGE_SIZE) as i64);
+        }
 
         let sm = Self {
             file: ThreadLocal::new(),
@@ -88,8 +90,7 @@ impl StorageManager {
                     .write(true)
                     .open(DATABASE_NAME)?;
 
-                let uring_file = tokio_uring::fs::File::from_std(std_file);
-                let file = SendWrapper::new(Rc::new(uring_file));
+                let file = SendWrapper::new(Rc::new(std_file));
 
                 self.file.get_or(move || file).deref().clone()
             }
@@ -131,8 +132,9 @@ impl StorageManagerHandle {
     ///
     /// On any sort of error, we still need to return the `Frame` back to the caller, so both the
     /// `Ok` and `Err` cases return the frame back.
-    pub(crate) async fn read_into(&self, pid: PageId, frame: Frame) -> BufResult<(), Frame> {
-        self.file.read_exact_at(frame, pid.offset()).await
+    pub(crate) fn read_into(&self, pid: PageId, frame: Frame) -> Frame {
+        self.file.read_exact_at(frame.buf, pid.offset());
+        frame
     }
 
     /// Writes a page's data on a `Frame` to persistent storage.
@@ -148,7 +150,8 @@ impl StorageManagerHandle {
     ///
     /// On any sort of error, we still need to return the `Frame` back to the caller, so both the
     /// `Ok` and `Err` cases return the frame back.
-    pub(crate) async fn write_from(&self, pid: PageId, frame: Frame) -> BufResult<(), Frame> {
-        self.file.write_all_at(frame, pid.offset()).await
+    pub(crate) fn write_from(&self, pid: PageId, frame: Frame) -> Frame {
+        self.file.write_at(frame.buf, pid.offset());
+        frame
     }
 }

@@ -5,8 +5,8 @@
 use crate::page::Page;
 use crate::storage::frame::Frame;
 use crate::storage::storage_manager::StorageManager;
-use async_channel::{Receiver, Sender};
 use std::io::Result;
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc, Mutex,
@@ -48,8 +48,8 @@ pub(crate) struct FrameGroup {
     /// The number of free frames in the free list.
     pub(crate) num_free_frames: AtomicUsize,
 
-    /// An asynchronous channel of free [`Frame`]s. Behaves as the free list of frames.
-    pub(crate) free_list: (Sender<Frame>, Receiver<Frame>),
+    /// An hronous channel of free [`Frame`]s. Behaves as the free list of frames.
+    pub(crate) free_list: (SyncSender<Frame>, Mutex<Receiver<Frame>>),
 }
 
 impl FrameGroup {
@@ -63,11 +63,11 @@ impl FrameGroup {
     where
         I: IntoIterator<Item = Frame>,
     {
-        let (rx, tx) = async_channel::bounded(FRAME_GROUP_SIZE);
+        let (rx, tx) = sync_channel::<Frame>(FRAME_GROUP_SIZE);
 
         let mut counter = 0;
         for frame in frames {
-            rx.send_blocking(frame).expect("Channel cannot be closed");
+            rx.send(frame).expect("Channel cannot be closed");
             counter += 1;
         }
         assert_eq!(counter, FRAME_GROUP_SIZE);
@@ -78,7 +78,7 @@ impl FrameGroup {
             group_id,
             eviction_states: Mutex::new(eviction_states),
             num_free_frames: AtomicUsize::new(FRAME_GROUP_SIZE),
-            free_list: (rx, tx),
+            free_list: (rx, Mutex::new(tx)),
         }
     }
 
@@ -90,14 +90,18 @@ impl FrameGroup {
     /// # Errors
     ///
     /// Returns an error if an I/O error occurs.
-    pub(crate) async fn get_free_frame(&self) -> Result<Frame> {
+    pub(crate) fn get_free_frame(&self) -> Result<Frame> {
         loop {
-            if let Ok(frame) = self.free_list.1.try_recv() {
+            let receiver = self
+                .free_list
+                .1
+                .lock()
+                .expect("Could not acquire latch on free list");
+            if let Ok(frame) = receiver.try_recv() {
                 self.num_free_frames.fetch_sub(1, Ordering::Release);
                 return Ok(frame);
             }
-
-            self.cool_frames().await?;
+            self.cool_frames();
         }
     }
 
@@ -107,7 +111,7 @@ impl FrameGroup {
     /// # Errors
     ///
     /// Returns an error if an I/O error occurs.
-    pub(crate) async fn cool_frames(&self) -> Result<()> {
+    pub(crate) fn cool_frames(&self) -> Result<()> {
         let mut eviction_pages: Vec<Arc<Page>> = Vec::with_capacity(FRAME_GROUP_SIZE);
 
         // Find page eviction candidates.
@@ -150,10 +154,9 @@ impl FrameGroup {
                     .expect("Tried to evict a frame that had no page owner");
 
                 // Write the data out to persistent storage.
-                let (res, frame) = sm.write_from(page.pid, frame).await;
-                res?;
+                let frame = sm.write_from(page.pid, frame);
 
-                self.free_list.0.send(frame).await.unwrap();
+                self.free_list.0.send(frame).unwrap();
                 self.num_free_frames.fetch_add(1, Ordering::Release);
             }
         }

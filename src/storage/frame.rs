@@ -7,11 +7,11 @@ use crate::{
     bpm::BufferPoolManager,
     page::{Page, PAGE_SIZE},
 };
+use std::sync::atomic::AtomicBool;
 use std::{
     ops::{Deref, DerefMut},
     sync::Arc,
 };
-use tokio_uring::buf::{IoBuf, IoBufMut};
 
 /// An owned buffer frame, intended to be shared between user and kernel space.
 #[derive(Debug)]
@@ -33,7 +33,10 @@ pub(crate) struct Frame {
     ///
     /// Since `Frame` is not [`Clone`]able, this `Frame` is guaranteed to have exclusive access to
     /// the mutable buffer.
-    buf: &'static mut [u8],
+    pub buf: &'static mut [u8],
+
+    /// Set to true if a RwLock on this frame is downgrading from a write lock to a read lock.
+    pub is_downgrading: AtomicBool,
 }
 
 impl Frame {
@@ -45,6 +48,7 @@ impl Frame {
             frame_id,
             buf,
             page_owner: None,
+            is_downgrading: AtomicBool::new(false),
         }
     }
 
@@ -98,45 +102,5 @@ impl Deref for Frame {
 impl DerefMut for Frame {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.buf
-    }
-}
-
-/// # Safety
-///
-/// The safety contract for `IoBuf` is as follows:
-/// > Buffers passed to `io-uring` operations must reference a stable memory region. While the
-/// > runtime holds ownership to a buffer, the pointer returned by `stable_ptr` must remain valid
-/// > even if the `IoBuf` value is moved.
-///
-/// Since we only use a static reference to correctly allocated memory, all operations are safe.
-unsafe impl IoBuf for Frame {
-    fn stable_ptr(&self) -> *const u8 {
-        self.buf.as_ptr()
-    }
-
-    fn bytes_init(&self) -> usize {
-        PAGE_SIZE
-    }
-
-    fn bytes_total(&self) -> usize {
-        PAGE_SIZE
-    }
-}
-
-/// # Safety
-///
-/// The safety contract for `IoBufMut` is as follows:
-/// > Buffers passed to `io-uring` operations must reference a stable memory region. While the
-/// > runtime holds ownership to a buffer, the pointer returned by `stable_mut_ptr` must remain
-/// > valid even if the `IoBufMut` value is moved.
-///
-/// Since we only use a static reference to correctly allocated memory, all operations are safe.
-unsafe impl IoBufMut for Frame {
-    fn stable_mut_ptr(&mut self) -> *mut u8 {
-        self.buf.as_mut_ptr()
-    }
-
-    unsafe fn set_init(&mut self, _pos: usize) {
-        // All bytes are initialized on allocation, so this function is a no-op.
     }
 }

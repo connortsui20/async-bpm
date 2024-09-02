@@ -14,7 +14,7 @@ use std::io::Result;
 use std::ops::Deref;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use tokio::sync::RwLockWriteGuard;
+use std::sync::RwLockWriteGuard;
 
 /// A thread-local handle to a logical page of data.
 #[derive(Derivative)]
@@ -41,10 +41,14 @@ impl PageHandle {
     /// # Errors
     ///
     /// Raises an error if an I/O error occurs while trying to load the data from disk into memory.
-    pub async fn read(&self) -> Result<ReadPageGuard> {
+    pub fn read(&self) -> Result<ReadPageGuard> {
         // Optimization: attempt to read only if we observe that the `is_loaded` flag is set.
         if self.page.is_loaded.load(Ordering::Acquire) {
-            let read_guard = self.page.frame.read().await;
+            let read_guard = self
+                .page
+                .frame
+                .read()
+                .expect("Could not read lock the frame");
 
             // If it is already loaded, then we're done.
             if let Some(frame) = read_guard.deref() {
@@ -58,11 +62,44 @@ impl PageHandle {
             drop(read_guard);
         }
 
-        let mut write_guard = self.page.frame.write().await;
+        let mut write_guard = self
+            .page
+            .frame
+            .write()
+            .expect("Could not write lock the frame");
 
-        self.load(&mut write_guard).await?;
+        // if it is being downgraded to read, we need to wait until it is done
+        while let Some(frame) = write_guard.deref() {
+            if frame.is_downgrading.load(Ordering::Acquire) {
+                drop(write_guard);
+                write_guard = self
+                    .page
+                    .frame
+                    .write()
+                    .expect("Could not write lock the frame");
+            } else {
+                break;
+            }
+        }
 
-        Ok(ReadPageGuard::new(self.page.pid, write_guard.downgrade()))
+        self.load(&mut write_guard)?;
+
+        if let Some(frame) = write_guard.deref() {
+            frame.is_downgrading.store(true, Ordering::Release);
+            drop(write_guard);
+        }
+
+        let mut read_guard = self
+            .page
+            .frame
+            .read()
+            .expect("Could not read lock the frame");
+
+        if let Some(frame) = read_guard.deref() {
+            frame.is_downgrading.store(false, Ordering::Release);
+        }
+
+        Ok(ReadPageGuard::new(self.page.pid, read_guard))
     }
 
     /// Attempts to optimistically get a read guard _without_ blocking.
@@ -73,7 +110,7 @@ impl PageHandle {
     /// # Errors
     ///
     /// Raises an error if an I/O error occurs while trying to load the data from disk into memory.
-    pub async fn try_read(&self) -> Result<Option<ReadPageGuard>> {
+    pub fn try_read(&self) -> Result<Option<ReadPageGuard>> {
         // Optimization: attempt to read only if we observe that the `is_loaded` flag is set.
         if self.page.is_loaded.load(Ordering::Acquire) {
             let Ok(read_guard) = self.page.frame.try_read() else {
@@ -92,14 +129,44 @@ impl PageHandle {
             drop(read_guard);
         }
 
-        let mut write_guard = self.page.frame.write().await;
+        let mut write_guard = self
+            .page
+            .frame
+            .write()
+            .expect("Could not write lock the frame");
 
-        self.load(&mut write_guard).await?;
+        // if it is being downgraded to read, we need to wait until it is done
+        while let Some(frame) = write_guard.deref() {
+            if frame.is_downgrading.load(Ordering::Acquire) {
+                drop(write_guard);
+                write_guard = self
+                    .page
+                    .frame
+                    .write()
+                    .expect("Could not write lock the frame");
+            } else {
+                break;
+            }
+        }
 
-        Ok(Some(ReadPageGuard::new(
-            self.page.pid,
-            write_guard.downgrade(),
-        )))
+        self.load(&mut write_guard)?;
+
+        if let Some(frame) = write_guard.deref() {
+            frame.is_downgrading.store(true, Ordering::Release);
+            drop(write_guard);
+        }
+
+        let mut read_guard = self
+            .page
+            .frame
+            .read()
+            .expect("Could not read lock the frame");
+
+        if let Some(frame) = read_guard.deref() {
+            frame.is_downgrading.store(false, Ordering::Release);
+        }
+
+        Ok(Some(ReadPageGuard::new(self.page.pid, read_guard)))
     }
 
     /// Gets a write guard on a logical page, which guarantees the data is in memory.
@@ -107,8 +174,26 @@ impl PageHandle {
     /// # Errors
     ///
     /// Raises an error if an I/O error occurs while trying to load the data from disk into memory.
-    pub async fn write(&self) -> Result<WritePageGuard> {
-        let mut write_guard = self.page.frame.write().await;
+    pub fn write(&self) -> Result<WritePageGuard> {
+        let mut write_guard = self
+            .page
+            .frame
+            .write()
+            .expect("Could not write lock the frame");
+
+        // if it is being downgraded to read, we need to wait until it is done
+        while let Some(frame) = write_guard.deref() {
+            if frame.is_downgrading.load(Ordering::Acquire) {
+                drop(write_guard);
+                write_guard = self
+                    .page
+                    .frame
+                    .write()
+                    .expect("Could not write lock the frame");
+            } else {
+                break;
+            }
+        }
 
         // If it is already loaded, then we're done.
         if let Some(frame) = write_guard.deref() {
@@ -118,7 +203,7 @@ impl PageHandle {
         }
 
         // Otherwise we need to load the page into memory.
-        self.load(&mut write_guard).await?;
+        self.load(&mut write_guard)?;
 
         Ok(WritePageGuard::new(self.page.pid, write_guard))
     }
@@ -131,7 +216,7 @@ impl PageHandle {
     /// # Errors
     ///
     /// Raises an error if an I/O error occurs while trying to load the data from disk into memory.
-    pub async fn try_write(&self) -> Result<Option<WritePageGuard>> {
+    pub fn try_write(&self) -> Result<Option<WritePageGuard>> {
         let Ok(mut write_guard) = self.page.frame.try_write() else {
             return Ok(None);
         };
@@ -144,7 +229,7 @@ impl PageHandle {
         }
 
         // Otherwise we need to load the page into memory.
-        self.load(&mut write_guard).await?;
+        self.load(&mut write_guard)?;
 
         Ok(Some(WritePageGuard::new(self.page.pid, write_guard)))
     }
@@ -154,7 +239,7 @@ impl PageHandle {
     /// # Errors
     ///
     /// Raises an error if an I/O error occurs while trying to load the data from disk into memory.
-    async fn load(&self, guard: &mut RwLockWriteGuard<'_, Option<Frame>>) -> Result<()> {
+    fn load(&self, guard: &mut RwLockWriteGuard<'_, Option<Frame>>) -> Result<()> {
         // If someone else got in front of us and loaded the page for us.
         if let Some(frame) = guard.deref().deref() {
             self.page.is_loaded.store(true, Ordering::Release);
@@ -167,13 +252,12 @@ impl PageHandle {
         let frame_group = bpm.get_random_frame_group();
 
         // Wait for a free frame.
-        let mut frame = frame_group.get_free_frame().await?;
+        let mut frame = frame_group.get_free_frame()?;
         let none = frame.replace_page_owner(self.page.clone());
         debug_assert!(none.is_none());
 
         // Read the data in from persistent storage via the storage manager handle.
-        let (res, frame) = self.sm.read_into(self.page.pid, frame).await;
-        res?;
+        let frame = self.sm.read_into(self.page.pid, frame);
 
         self.page.is_loaded.store(true, Ordering::Release);
         frame.record_access(self.page.clone());

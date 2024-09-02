@@ -7,14 +7,13 @@ use crate::{
     storage::{Frame, FrameGroup, StorageManager, FRAME_GROUP_SIZE},
 };
 use rand::prelude::*;
+use std::io::Result;
 use std::sync::Mutex;
+use std::sync::RwLock;
 use std::{
     collections::HashMap,
     sync::{atomic::AtomicBool, Arc, OnceLock},
 };
-use std::{future::Future, io::Result};
-use tokio::sync::RwLock;
-use tokio::task;
 
 /// The global buffer pool manager instance.
 static BPM: OnceLock<BufferPoolManager> = OnceLock::new();
@@ -176,57 +175,57 @@ impl BufferPoolManager {
         self.get_frame_group(index)
     }
 
-    /// Starts a [`tokio_uring`] runtime on a single thread that runs the given [`Future`].
-    ///
-    /// TODO more docs
-    ///
-    /// # Panics
-    ///
-    /// This function will panic if it is unable to spawn the eviction task for some reason.
-    pub fn start_thread<F: Future>(future: F) -> F::Output {
-        tokio_uring::start(async move {
-            tokio::select! {
-                output = future => output,
-                // TODO figure out why including this is this slower
-                _ = Self::spawn_evictor() => unreachable!("The eviction task should never return")
-            }
-        })
-    }
+    // /// Starts a [`tokio_uring`] runtime on a single thread that runs the given [`Future`].
+    // ///
+    // /// TODO more docs
+    // ///
+    // /// # Panics
+    // ///
+    // /// This function will panic if it is unable to spawn the eviction task for some reason.
+    // pub fn start_thread<F: Future>(future: F) -> F::Output {
+    //     tokio_uring::start( move {
+    //         tokio::select! {
+    //             output = future => output,
+    //             // TODO figure out why including this is this slower
+    //             // _ = Self::spawn_evictor() => unreachable!("The eviction task should never return")
+    //         }
+    //     })
+    // }
 
-    /// Spawns a thread-local task on the current thread.
-    ///
-    /// Note that the caller must `.await` the return of this function in order to run the future.
-    ///
-    /// TODO docs
-    pub fn spawn_local<T: Future + 'static>(task: T) -> task::JoinHandle<T::Output> {
-        tokio_uring::spawn(task)
-    }
+    // /// Spawns a thread-local task on the current thread.
+    // ///
+    // /// Note that the caller must `.await` the return of this function in order to run the future.
+    // ///
+    // /// TODO docs
+    // pub fn spawn_local<T: Future + 'static>(task: T) -> task::JoinHandle<T::Output> {
+    //     tokio_uring::spawn(task)
+    // }
 
-    /// Spawns an eviction task.
-    ///
-    /// TODO more docs
-    ///
-    /// # Panics
-    ///
-    /// Panics if unable to evict frames due to an I/O error.
-    pub fn spawn_evictor() -> task::JoinHandle<()> {
-        tokio_uring::spawn(async {
-            let bpm = Self::get();
-            loop {
-                tokio::task::yield_now().await;
+    // /// Spawns an eviction task.
+    // ///
+    // /// TODO more docs
+    // ///
+    // /// # Panics
+    // ///
+    // /// Panics if unable to evict frames due to an I/O error.
+    // pub fn spawn_evictor() -> task::JoinHandle<()> {
+    //     tokio_uring::spawn( {
+    //         let bpm = Self::get();
+    //         loop {
+    //             tokio::task::yield_now().await;
 
-                let group = bpm.get_random_frame_group();
-                if group.num_free_frames() < FRAME_GROUP_SIZE / 10 {
-                    group
-                        .cool_frames()
-                        .await
-                        .expect("Unable to evict frames due to I/O error");
-                }
+    //             let group = bpm.get_random_frame_group();
+    //             if group.num_free_frames() < FRAME_GROUP_SIZE / 10 {
+    //                 group
+    //                     .cool_frames()
+    //                     .await
+    //                     .expect("Unable to evict frames due to I/O error");
+    //             }
 
-                // Sleep once we have nothing to do.
-                // TODO removing this should not cause the system to halt.
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            }
-        })
-    }
+    //             // Sleep once we have nothing to do.
+    //             // TODO removing this should not cause the system to halt.
+    //             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    //         }
+    //     })
+    // }
 }

@@ -2,8 +2,8 @@
 
 use crate::storage::{Frame, StorageManager};
 use derivative::Derivative;
+use std::sync::RwLock;
 use std::{fmt::Display, sync::atomic::AtomicBool};
-use tokio::sync::RwLock;
 
 /// The size of a buffer `Frame` / logical [`Page`] of data.
 pub const PAGE_SIZE: usize = 1 << 12;
