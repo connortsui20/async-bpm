@@ -6,7 +6,8 @@ use crate::page::Page;
 use crate::storage::frame::Frame;
 use crate::storage::storage_manager::StorageManager;
 use std::io::Result;
-use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
+// use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
+use crossbeam_channel::{bounded, Receiver, Sender};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc, Mutex,
@@ -49,7 +50,7 @@ pub(crate) struct FrameGroup {
     pub(crate) num_free_frames: AtomicUsize,
 
     /// An hronous channel of free [`Frame`]s. Behaves as the free list of frames.
-    pub(crate) free_list: (SyncSender<Frame>, Mutex<Receiver<Frame>>),
+    pub(crate) free_list: (Sender<Frame>, Receiver<Frame>),
 }
 
 impl FrameGroup {
@@ -63,11 +64,11 @@ impl FrameGroup {
     where
         I: IntoIterator<Item = Frame>,
     {
-        let (rx, tx) = sync_channel::<Frame>(FRAME_GROUP_SIZE);
+        let (tx, rx) = bounded::<Frame>(FRAME_GROUP_SIZE);
 
         let mut counter = 0;
         for frame in frames {
-            rx.send(frame).expect("Channel cannot be closed");
+            tx.send(frame).expect("Channel cannot be closed");
             counter += 1;
         }
         assert_eq!(counter, FRAME_GROUP_SIZE);
@@ -78,7 +79,7 @@ impl FrameGroup {
             group_id,
             eviction_states: Mutex::new(eviction_states),
             num_free_frames: AtomicUsize::new(FRAME_GROUP_SIZE),
-            free_list: (rx, Mutex::new(tx)),
+            free_list: (tx, rx),
         }
     }
 
@@ -92,12 +93,7 @@ impl FrameGroup {
     /// Returns an error if an I/O error occurs.
     pub(crate) fn get_free_frame(&self) -> Result<Frame> {
         loop {
-            let receiver = self
-                .free_list
-                .1
-                .lock()
-                .expect("Could not acquire latch on free list");
-            if let Ok(frame) = receiver.try_recv() {
+            if let Ok(frame) = self.free_list.1.try_recv() {
                 self.num_free_frames.fetch_sub(1, Ordering::Release);
                 return Ok(frame);
             }
