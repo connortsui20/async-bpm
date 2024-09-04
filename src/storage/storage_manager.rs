@@ -11,15 +11,12 @@
 
 use crate::page::PAGE_SIZE;
 use crate::{page::PageId, storage::frame::Frame};
-use libc;
-use send_wrapper::SendWrapper;
 use std::fs::File;
 use std::io::Result;
-use std::ops::Deref;
 use std::os::fd::AsRawFd;
 use std::os::unix::prelude::FileExt;
-use std::{rc::Rc, sync::OnceLock};
-use thread_local::ThreadLocal;
+use std::sync::Arc;
+use std::sync::OnceLock;
 
 /// TODO refactor this out
 pub const DATABASE_NAME: &str = "test.db";
@@ -31,7 +28,7 @@ pub(crate) static STORAGE_MANAGER: OnceLock<StorageManager> = OnceLock::new();
 #[derive(Debug)]
 pub(crate) struct StorageManager {
     /// TODO does this even make sense
-    file: ThreadLocal<SendWrapper<Rc<File>>>,
+    file: Arc<File>,
 }
 
 impl StorageManager {
@@ -54,7 +51,7 @@ impl StorageManager {
         }
 
         let sm = Self {
-            file: ThreadLocal::new(),
+            file: Arc::new(file),
         };
 
         STORAGE_MANAGER
@@ -82,21 +79,24 @@ impl StorageManager {
     ///
     /// Returns an error if unable to create a [`File`] to the database files on disk.
     pub(crate) fn create_handle(&self) -> Result<StorageManagerHandle> {
-        let file = match self.file.get() {
-            Some(file) => file.deref().clone(),
-            None => {
-                let std_file = std::fs::OpenOptions::new()
-                    .read(true)
-                    .write(true)
-                    .open(DATABASE_NAME)?;
+        // let file = match self.file.try_clone() {
+        //     Ok(file) => Ok(StorageManagerHandle {file.cl}),
+        //     Err(e) => {
+        //         return Err(e);
+        //         // let std_file = std::fs::OpenOptions::new()
+        //         //     .read(true)
+        //         //     .write(true)
+        //         //     .open(DATABASE_NAME)?;
+        //         // self.file = Arc::new(std_file.try_clone()?);
+        //         // std_file
+        //         // self.file.get_or(move || file).deref().clone()
+        //         // self.file.get_or_init(move || ).deref().clone()
+        //     }
+        // };
 
-                let file = SendWrapper::new(Rc::new(std_file));
-
-                self.file.get_or(move || file).deref().clone()
-            }
-        };
-
-        Ok(StorageManagerHandle { file })
+        Ok(StorageManagerHandle {
+            file: self.file.clone(),
+        })
     }
 
     /// Retrieves the number of drives that the pages are stored on in persistent storage.
@@ -115,7 +115,7 @@ impl StorageManager {
 #[derive(Debug, Clone)]
 pub(crate) struct StorageManagerHandle {
     /// TODO does this even make sense
-    file: Rc<File>,
+    file: Arc<File>,
 }
 
 impl StorageManagerHandle {
@@ -132,9 +132,11 @@ impl StorageManagerHandle {
     ///
     /// On any sort of error, we still need to return the `Frame` back to the caller, so both the
     /// `Ok` and `Err` cases return the frame back.
-    pub(crate) fn read_into(&self, pid: PageId, frame: Frame) -> Frame {
-        self.file.read_exact_at(frame.buf, pid.offset());
-        frame
+    pub(crate) fn read_into(&self, pid: PageId, frame: Frame) -> Result<Frame> {
+        match self.file.read_exact_at(frame.buf, pid.offset()) {
+            Ok(_) => Ok(frame),
+            Err(e) => Err(e),
+        }
     }
 
     /// Writes a page's data on a `Frame` to persistent storage.
@@ -150,8 +152,10 @@ impl StorageManagerHandle {
     ///
     /// On any sort of error, we still need to return the `Frame` back to the caller, so both the
     /// `Ok` and `Err` cases return the frame back.
-    pub(crate) fn write_from(&self, pid: PageId, frame: Frame) -> Frame {
-        self.file.write_at(frame.buf, pid.offset());
-        frame
+    pub(crate) fn write_from(&self, pid: PageId, frame: Frame) -> Result<Frame> {
+        match self.file.write_at(frame.buf, pid.offset()) {
+            Ok(_) => Ok(frame),
+            Err(e) => Err(e),
+        }
     }
 }

@@ -31,21 +31,21 @@ fn test_basic() {
     thread::scope(|s| {
         for i in 0..THREADS {
             s.spawn(move || {
-                    let index = 2 * i as u8;
-                    let pid = PageId::new(index as u64);
-                    let ph = bpm.get_page(&pid).unwrap();
+                let index = 2 * i as u8;
+                let pid = PageId::new(index as u64);
+                let ph = bpm.get_page(&pid).unwrap();
 
-                    let mut guard = ph.write().unwrap();
-                    guard.deref_mut().fill(b' ' + index);
-                    guard.flush().unwrap();
+                let mut guard = ph.write().unwrap();
+                guard.deref_mut().fill(b' ' + index);
+                guard.flush().unwrap();
 
-                    let index = ((2 * i) + 1) as u8;
-                    let pid = PageId::new(index as u64);
-                    let ph = bpm.get_page(&pid).unwrap();
+                let index = ((2 * i) + 1) as u8;
+                let pid = PageId::new(index as u64);
+                let ph = bpm.get_page(&pid).unwrap();
 
-                    let mut guard: async_bpm::page::WritePageGuard = ph.write().unwrap();
-                    guard.deref_mut().fill(b' ' + index);
-                    guard.flush().unwrap();
+                let mut guard: async_bpm::page::WritePageGuard = ph.write().unwrap();
+                guard.deref_mut().fill(b' ' + index);
+                guard.flush().unwrap();
             });
         }
     });

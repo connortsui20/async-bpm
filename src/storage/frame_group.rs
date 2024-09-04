@@ -97,7 +97,7 @@ impl FrameGroup {
                 self.num_free_frames.fetch_sub(1, Ordering::Release);
                 return Ok(frame);
             }
-            self.cool_frames();
+            self.cool_frames()?;
         }
     }
 
@@ -150,7 +150,7 @@ impl FrameGroup {
                     .expect("Tried to evict a frame that had no page owner");
 
                 // Write the data out to persistent storage.
-                let frame = sm.write_from(page.pid, frame);
+                let frame = sm.write_from(page.pid, frame)?;
 
                 self.free_list.0.send(frame).unwrap();
                 self.num_free_frames.fetch_add(1, Ordering::Release);
@@ -158,11 +158,6 @@ impl FrameGroup {
         }
 
         Ok(())
-    }
-
-    /// Gets the number of free frames in this `FrameGroup`.
-    pub(crate) fn num_free_frames(&self) -> usize {
-        self.num_free_frames.load(Ordering::Acquire)
     }
 }
 

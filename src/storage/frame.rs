@@ -3,10 +3,7 @@
 //! TODO more docs.
 
 use crate::storage::frame_group::{EvictionState, FrameGroup, FRAME_GROUP_SIZE};
-use crate::{
-    bpm::BufferPoolManager,
-    page::{Page, PAGE_SIZE},
-};
+use crate::{bpm::BufferPoolManager, page::Page};
 use std::sync::atomic::AtomicBool;
 use std::{
     ops::{Deref, DerefMut},

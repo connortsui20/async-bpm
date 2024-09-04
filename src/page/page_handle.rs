@@ -41,6 +41,10 @@ impl PageHandle {
     /// # Errors
     ///
     /// Raises an error if an I/O error occurs while trying to load the data from disk into memory.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the latch on the frame that we want read from/ write into is poisned.
     pub fn read(&self) -> Result<ReadPageGuard> {
         // Optimization: attempt to read only if we observe that the `is_loaded` flag is set.
         if self.page.is_loaded.load(Ordering::Acquire) {
@@ -89,7 +93,7 @@ impl PageHandle {
             drop(write_guard);
         }
 
-        let mut read_guard = self
+        let read_guard = self
             .page
             .frame
             .read()
@@ -110,6 +114,10 @@ impl PageHandle {
     /// # Errors
     ///
     /// Raises an error if an I/O error occurs while trying to load the data from disk into memory.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the latch on the frame that we want read from/ write into is poisned.
     pub fn try_read(&self) -> Result<Option<ReadPageGuard>> {
         // Optimization: attempt to read only if we observe that the `is_loaded` flag is set.
         if self.page.is_loaded.load(Ordering::Acquire) {
@@ -156,7 +164,7 @@ impl PageHandle {
             drop(write_guard);
         }
 
-        let mut read_guard = self
+        let read_guard = self
             .page
             .frame
             .read()
@@ -174,6 +182,10 @@ impl PageHandle {
     /// # Errors
     ///
     /// Raises an error if an I/O error occurs while trying to load the data from disk into memory.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the latch on the frame that we want write from/ write into is poisned.
     pub fn write(&self) -> Result<WritePageGuard> {
         let mut write_guard = self
             .page
@@ -216,6 +228,10 @@ impl PageHandle {
     /// # Errors
     ///
     /// Raises an error if an I/O error occurs while trying to load the data from disk into memory.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the latch on the frame that we want write from/ write into is poisned.
     pub fn try_write(&self) -> Result<Option<WritePageGuard>> {
         let Ok(mut write_guard) = self.page.frame.try_write() else {
             return Ok(None);
@@ -257,7 +273,7 @@ impl PageHandle {
         debug_assert!(none.is_none());
 
         // Read the data in from persistent storage via the storage manager handle.
-        let frame = self.sm.read_into(self.page.pid, frame);
+        let frame = self.sm.read_into(self.page.pid, frame)?;
 
         self.page.is_loaded.store(true, Ordering::Release);
         frame.record_access(self.page.clone());
