@@ -10,7 +10,7 @@ buffer pool manager would be implemented.
 Most notable is the fact that I/O is non-blocking, courtesy of the `io_uring` Linux interface that
 the [`tokio_uring`] interface is built on top of. The second most notable part of this system is
 that there is no global page table that users must go through to access any page of data. All page
-data and data movement (eviction) is _decentralized_. 
+data and data movement (eviction) is _decentralized_.
 
 By making use of [`tokio_uring`], this buffer pool manager is implemented with a thread-per-core
 model where many light-weight asynchronous tasks can be scheduled on each operating system provided
@@ -20,15 +20,16 @@ responsibility of the caller to ensure that tasks are balanced between threads.
 # Usage
 
 The intended usage is as follows:
--   Call [`BufferPoolManager::initialize`] to set the memory and storage sizes
--   Spawn 1 operating system thread for every CPU core
--   Call [`BufferPoolManager::start_thread`] on each thread to initialize each for the buffer pool
--   For each of the tasks on each thread, call [`BufferPoolManager::spawn_local`]
--   To access a page of data, use [`PageHandle`](crate::page::PageHandle)s via
-[`BufferPoolManager::get_page`]
--   Use the [`read`](crate::page::PageHandle::read) or [`write`](crate::page::PageHandle::write)
-methods on [`PageHandle`](crate::page::PageHandle) and then perform the intended operations over the
-page's data
+
+- Call [`BufferPoolManager::initialize`] to set the memory and storage sizes
+- Spawn 1 operating system thread for every CPU core
+- Call [`BufferPoolManager::start_thread`] on each thread to initialize each for the buffer pool
+- For each of the tasks on each thread, call [`BufferPoolManager::spawn_local`]
+- To access a page of data, use [`PageHandle`](crate::page::PageHandle)s via
+  [`BufferPoolManager::get_page`]
+- Use the [`read`](crate::page::PageHandle::read) or [`write`](crate::page::PageHandle::write)
+  methods on [`PageHandle`](crate::page::PageHandle) and then perform the intended operations over the
+  page's data
 
 ### Single-Threaded Example
 
@@ -131,8 +132,8 @@ reason that it is not a multi-threaded worker pool model like the [`tokio`] runt
 the `io_uring` Linux interface works. I/O operations on `io_uring` are submitted to a single
 `io_uring` instance that is registered per-thread to eliminate contention. To move a task to a
 separate thread would mean that the task could no longer poll the operation result off of the
-thread-local `io_uring` completion queue. Thus, lightweight asynchronous tasks given to worker 
-threads cannot be moved between threads (or in other words, are `!Send`). 
+thread-local `io_uring` completion queue. Thus, lightweight asynchronous tasks given to worker
+threads cannot be moved between threads (or in other words, are `!Send`).
 
 A consequence of this fact is that threads cannot work-steal in the same manner that the [`tokio`]
 runtime allows threads to do. It is thus the responsibility of some global scheduler to assign tasks
