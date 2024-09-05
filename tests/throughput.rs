@@ -112,35 +112,35 @@ fn spawn_bench_task<const ZIPF: bool>(barrier: Arc<Barrier>) {
     let coin = Bernoulli::new(WRITE_RATIO).unwrap();
     let mut rng = rand::thread_rng();
 
-        let mut handles = Vec::with_capacity(ITERATIONS);
+    let mut handles = Vec::with_capacity(ITERATIONS);
 
-        for _ in 0..ITERATIONS {
-            let id = if ZIPF {
-                zipf.sample(&mut rng)
-            } else {
-                rng.gen_range(0..STORAGE_PAGES)
-            } as u64;
+    for _ in 0..ITERATIONS {
+        let id = if ZIPF {
+            zipf.sample(&mut rng)
+        } else {
+            rng.gen_range(0..STORAGE_PAGES)
+        } as u64;
 
-            let pid = PageId::new(id);
-            let ph = bpm.get_page(&pid).unwrap();
+        let pid = PageId::new(id);
+        let ph = bpm.get_page(&pid).unwrap();
 
-            handles.push(ph);
+        handles.push(ph);
+    }
+
+    // Wait for all tasks to finish setup.
+    barrier.wait();
+
+    for ph in handles {
+        if coin.sample(&mut rng) {
+            let mut write_guard = ph.write().unwrap();
+            write_guard.deref_mut().fill(b'a');
+            write_guard.flush().unwrap();
+        } else {
+            let read_guard = ph.read().unwrap();
+            let slice = read_guard.deref();
+            std::hint::black_box(slice);
         }
 
-        // Wait for all tasks to finish setup.
-        barrier.wait();
-
-        for ph in handles {
-            if coin.sample(&mut rng) {
-                let mut write_guard = ph.write().unwrap();
-                write_guard.deref_mut().fill(b'a');
-                write_guard.flush().unwrap();
-            } else {
-                let read_guard = ph.read().unwrap();
-                let slice = read_guard.deref();
-                std::hint::black_box(slice);
-            }
-
-            COUNTER.fetch_add(1, Ordering::Release);
-        }
+        COUNTER.fetch_add(1, Ordering::Release);
+    }
 }
