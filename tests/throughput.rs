@@ -38,14 +38,13 @@ const ZIPF_EXP: f64 = 1.1;
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
-#[test]
-#[ignore]
-fn bench_random() {
-    throughput::<false>();
-}
+// #[test]
+// #[ignore]
+// fn bench_random() {
+//     throughput::<false>();
+// }
 
 #[test]
-#[ignore]
 fn bench_zipf() {
     throughput::<true>();
 }

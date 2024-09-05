@@ -18,8 +18,8 @@ use std::{rc::Rc, sync::OnceLock};
 use tokio_uring::fs::File;
 use tokio_uring::BufResult;
 
-/// TODO refactor this out
-pub const DATABASE_NAME: &str = "test.db";
+/// The name of the database's file.
+pub const DATABASE_NAME: &str = "bpm.db";
 
 /// The global storage manager instance.
 pub(crate) static STORAGE_MANAGER: OnceLock<StorageManager> = OnceLock::new();

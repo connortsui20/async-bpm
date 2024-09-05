@@ -1,6 +1,13 @@
 //! This module contains the declaration and implementation of the [`BufferPoolManager`] type.
 //!
-//! TODO docs.
+//! This buffer pool manager has an asynchronous implementation that is built on top of an
+//! asynchronous thread-per-core runtime called [`tokio_uring`], which is itself built on top of the
+//! Linux `io_uring` interface.
+//!
+//! The goal for this buffer pool manager is to exploit parallelism as much as possible by limiting
+//! the use of any global latches or single points of contention for the entire system. This means
+//! that several parts of the system are implemented quite differently from how a traditional buffer
+//! pool manager would work.
 
 use crate::{
     page::{Page, PageHandle, PageId, PAGE_SIZE},
@@ -173,13 +180,13 @@ impl BufferPoolManager {
     ///
     /// This function will panic if it is unable to spawn the eviction task for some reason.
     pub fn start_thread<F: Future>(future: F) -> F::Output {
-        tokio_uring::start(async move {
-            tokio::select! {
-                output = future => output,
-                // TODO figure out why including this is this slower
-                _ = Self::spawn_evictor() => unreachable!("The eviction task should never return")
-            }
-        })
+        // tokio_uring::start(async move {
+        //     tokio::select! {
+        //         output = future => output,
+        //         _ = Self::spawn_evictor() => unreachable!("The eviction task should never return")
+        //     }
+        // })
+        tokio_uring::start(future)
     }
 
     /// Spawns a thread-local task on the current thread.

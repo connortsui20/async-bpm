@@ -1,6 +1,8 @@
-//! This module contains the type definiton and implementation for the [`Frame`] struct.
+//! This module contains the type definitions and implementation for the [`Frame`] struct.
 //!
-//! TODO more docs.
+//! A [`Frame`] is intended to hold [`PAGE_SIZE`] bytes of data, and is also intended to be shared
+//! with the the kernel to avoid unnecessary `memcpy`s from the kernel's internal buffers into
+//! user-space buffers.
 
 use crate::storage::frame_group::{EvictionState, FrameGroup, FRAME_GROUP_SIZE};
 use crate::{
@@ -94,6 +96,7 @@ impl Frame {
         eviction_guard[index] = EvictionState::Hot(page.clone());
     }
 
+    /// Checks if the dirty bit is set.
     pub(crate) fn is_dirty(&self) -> bool {
         self.dirty
     }

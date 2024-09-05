@@ -1,6 +1,8 @@
-//! This module contains the type definiton and implementation for the [`FrameGroup`] struct.
+//! This module contains the type definition and implementation for the [`FrameGroup`] struct.
 //!
-//! TODO more docs.
+//! A [`FrameGroup`] instance groups [`Frame`]s together so that eviction algorithms can be run on
+//! pre-determined groups of frames without having to manage which logical pages are in memory or
+//! not in memory.
 
 use crate::page::Page;
 use crate::storage::frame::Frame;
