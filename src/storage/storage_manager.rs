@@ -15,7 +15,6 @@ use std::fs::File;
 use std::io::Result;
 use std::os::fd::AsRawFd;
 use std::os::unix::prelude::FileExt;
-use std::sync::Arc;
 use std::sync::OnceLock;
 
 /// TODO refactor this out
@@ -26,10 +25,10 @@ pub(crate) static STORAGE_MANAGER: OnceLock<StorageManager> = OnceLock::new();
 
 /// Manages reads into and writes from `Frame`s between memory and persistent storage.
 #[derive(Debug)]
-pub(crate) struct StorageManager {
-    /// TODO does this even make sense
-    file: Arc<File>,
-}
+pub(crate) struct StorageManager; // {
+/// TODO does this even make sense, Ans: it does not.
+// file: Arc<File>,
+// }
 
 impl StorageManager {
     /// Creates a new shared [`StorageManager`] instance.
@@ -51,7 +50,7 @@ impl StorageManager {
         }
 
         let sm = Self {
-            file: Arc::new(file),
+            // file: Arc::new(file),
         };
 
         STORAGE_MANAGER
@@ -80,23 +79,25 @@ impl StorageManager {
     /// Returns an error if unable to create a [`File`] to the database files on disk.
     pub(crate) fn create_handle(&self) -> Result<StorageManagerHandle> {
         // let file = match self.file.try_clone() {
-        //     Ok(file) => Ok(StorageManagerHandle {file.cl}),
+        //     Ok(file) => Ok(StorageManagerHandle {file}),
         //     Err(e) => {
         //         return Err(e);
-        //         // let std_file = std::fs::OpenOptions::new()
-        //         //     .read(true)
-        //         //     .write(true)
-        //         //     .open(DATABASE_NAME)?;
-        //         // self.file = Arc::new(std_file.try_clone()?);
-        //         // std_file
-        //         // self.file.get_or(move || file).deref().clone()
-        //         // self.file.get_or_init(move || ).deref().clone()
+        // let std_file = std::fs::OpenOptions::new()
+        //     .read(true)
+        //     .write(true)
+        //     .open(DATABASE_NAME)?;
+        // self.file = Arc::new(std_file.try_clone()?);
+        // std_file
+        // self.file.get_or(move || file).deref().clone()
+        // self.file.get_or_init(move || ).deref().clone()
         //     }
         // };
+        let std_file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(DATABASE_NAME)?;
 
-        Ok(StorageManagerHandle {
-            file: self.file.clone(),
-        })
+        Ok(StorageManagerHandle { file: std_file })
     }
 
     /// Retrieves the number of drives that the pages are stored on in persistent storage.
@@ -112,10 +113,18 @@ impl StorageManager {
 /// A thread-local handle to a [`StorageManager`].
 ///
 /// TODO this might not be named appropriately anymore
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct StorageManagerHandle {
     /// TODO does this even make sense
-    file: Arc<File>,
+    file: File,
+}
+
+impl Clone for StorageManagerHandle {
+    fn clone(&self) -> Self {
+        StorageManagerHandle {
+            file: self.file.try_clone().expect("Failed to clone file"),
+        }
+    }
 }
 
 impl StorageManagerHandle {
@@ -135,7 +144,10 @@ impl StorageManagerHandle {
     pub(crate) fn read_into(&self, pid: PageId, frame: Frame) -> Result<Frame> {
         match self.file.read_exact_at(frame.buf, pid.offset()) {
             Ok(_) => Ok(frame),
-            Err(e) => Err(e),
+            Err(e) => {
+                println!("{}", e);
+                Err(e)
+            }
         }
     }
 

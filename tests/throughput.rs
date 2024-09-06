@@ -5,6 +5,7 @@ use async_bpm::{
 use core_affinity::CoreId;
 use rand::distributions::Bernoulli;
 use rand::{distributions::Distribution, Rng};
+use std::sync::Barrier;
 use std::{
     ops::{Deref, DerefMut},
     sync::{
@@ -12,10 +13,6 @@ use std::{
         Arc,
     },
     thread,
-};
-use tokio::{
-    sync::Barrier,
-    task::{JoinHandle, JoinSet},
 };
 use zipf::ZipfDistribution;
 
@@ -129,6 +126,7 @@ fn spawn_bench_task<const ZIPF: bool>(barrier: Arc<Barrier>) {
 
     // Wait for all tasks to finish setup.
     barrier.wait();
+    println!("Setup Completed");
 
     for ph in handles {
         if coin.sample(&mut rng) {
