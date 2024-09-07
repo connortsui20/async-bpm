@@ -13,15 +13,29 @@ use crate::page::PAGE_SIZE;
 use crate::{page::PageId, storage::frame::Frame};
 use std::fs::File;
 use std::io::Result;
+use std::ops::Deref;
 use std::os::fd::AsRawFd;
 use std::os::unix::prelude::FileExt;
-use std::sync::OnceLock;
+use std::rc::Rc;
+use std::sync::{LazyLock, OnceLock};
 
 /// TODO refactor this out
 pub const DATABASE_NAME: &str = "test.db";
 
 /// The global storage manager instance.
 pub(crate) static STORAGE_MANAGER: OnceLock<StorageManager> = OnceLock::new();
+
+std::thread_local! {
+    static DB_FILE: LazyLock<Rc<File>> = LazyLock::new(|| {
+        let std_file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(DATABASE_NAME)
+            .expect("Thread is unable to create a file handle");
+
+        Rc::new(std_file)
+    });
+}
 
 /// Manages reads into and writes from `Frame`s between memory and persistent storage.
 #[derive(Debug)]
@@ -92,10 +106,12 @@ impl StorageManager {
         // self.file.get_or_init(move || ).deref().clone()
         //     }
         // };
-        let std_file = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(DATABASE_NAME)?;
+        // let std_file = std::fs::OpenOptions::new()
+        //     .read(true)
+        //     .write(true)
+        //     .open(DATABASE_NAME)?;
+
+        let std_file = DB_FILE.with(|f| f.deref().clone());
 
         Ok(StorageManagerHandle { file: std_file })
     }
@@ -116,13 +132,13 @@ impl StorageManager {
 #[derive(Debug)]
 pub(crate) struct StorageManagerHandle {
     /// TODO does this even make sense
-    file: File,
+    file: Rc<File>,
 }
 
 impl Clone for StorageManagerHandle {
     fn clone(&self) -> Self {
         StorageManagerHandle {
-            file: self.file.try_clone().expect("Failed to clone file"),
+            file: self.file.clone(),
         }
     }
 }

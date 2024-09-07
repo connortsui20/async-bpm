@@ -58,15 +58,15 @@ fn throughput<const ZIPF: bool>() {
     println!("Operations: {OPERATIONS}");
 
     let start = std::time::Instant::now();
-    let barrier = Arc::new(Barrier::new(THREADS * TASKS));
+    let barrier = Arc::new(Barrier::new(THREADS));
 
     thread::scope(|s| {
         // Spawn all threads with tasks on them.
         for thread in 0..THREADS {
             let barrier = barrier.clone();
             s.spawn(move || {
-                let core_id = CoreId { id: thread };
-                assert!(core_affinity::set_for_current(core_id));
+                // let core_id = CoreId { id: thread };
+                // assert!(core_affinity::set_for_current(core_id));
 
                 // Spawn all of the tasks lazily.
                 spawn_bench_task::<ZIPF>(barrier.clone());
