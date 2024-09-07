@@ -19,12 +19,12 @@ use zipf::ZipfDistribution;
 const GIGABYTE: usize = 1024 * 1024 * 1024;
 const GIGABYTE_PAGES: usize = GIGABYTE / PAGE_SIZE;
 
-const THREADS: usize = 4;
-const TASKS: usize = 128; // tasks per thread
+const THREADS: usize = 8;
+// const TASKS: usize = 128; // tasks per thread
 const OPERATIONS: usize = 1 << 24;
 
 const THREAD_OPERATIONS: usize = OPERATIONS / THREADS;
-const ITERATIONS: usize = THREAD_OPERATIONS / TASKS; // iterations per task
+const ITERATIONS: usize = THREAD_OPERATIONS; // iterations per task
 
 const FRAMES: usize = GIGABYTE_PAGES;
 const STORAGE_PAGES: usize = 32 * GIGABYTE_PAGES;
@@ -65,8 +65,7 @@ fn throughput<const ZIPF: bool>() {
         for thread in 0..THREADS {
             let barrier = barrier.clone();
             s.spawn(move || {
-                // let core_id = CoreId { id: thread };
-                // assert!(core_affinity::set_for_current(core_id));
+                let core_id = CoreId { id: thread };
 
                 // Spawn all of the tasks lazily.
                 spawn_bench_task::<ZIPF>(barrier.clone());
@@ -83,7 +82,7 @@ fn throughput<const ZIPF: bool>() {
                 std::hint::spin_loop();
             }
 
-            while counter < THREADS * TASKS * ITERATIONS {
+            while counter < THREADS * ITERATIONS {
                 let prev = counter;
                 counter = COUNTER.load(Ordering::Acquire);
 
@@ -99,7 +98,7 @@ fn throughput<const ZIPF: bool>() {
         });
     });
 
-    assert_eq!(COUNTER.load(Ordering::SeqCst), THREADS * TASKS * ITERATIONS);
+    assert_eq!(COUNTER.load(Ordering::SeqCst), THREADS * ITERATIONS);
 }
 
 fn spawn_bench_task<const ZIPF: bool>(barrier: Arc<Barrier>) {
