@@ -92,25 +92,6 @@ impl StorageManager {
     ///
     /// Returns an error if unable to create a [`File`] to the database files on disk.
     pub(crate) fn create_handle(&self) -> Result<StorageManagerHandle> {
-        // let file = match self.file.try_clone() {
-        //     Ok(file) => Ok(StorageManagerHandle {file}),
-        //     Err(e) => {
-        //         return Err(e);
-        // let std_file = std::fs::OpenOptions::new()
-        //     .read(true)
-        //     .write(true)
-        //     .open(DATABASE_NAME)?;
-        // self.file = Arc::new(std_file.try_clone()?);
-        // std_file
-        // self.file.get_or(move || file).deref().clone()
-        // self.file.get_or_init(move || ).deref().clone()
-        //     }
-        // };
-        // let std_file = std::fs::OpenOptions::new()
-        //     .read(true)
-        //     .write(true)
-        //     .open(DATABASE_NAME)?;
-
         let std_file = DB_FILE.with(|f| f.deref().clone());
 
         Ok(StorageManagerHandle { file: std_file })

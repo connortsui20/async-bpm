@@ -34,6 +34,9 @@ pub(crate) struct Frame {
 
     /// Set to true if a RwLock on this frame is downgrading from a write lock to a read lock.
     pub is_downgrading: AtomicBool,
+
+    /// Set to true if the frame has data that needs to be written to disk.
+    pub is_dirty: AtomicBool,
 }
 
 impl Frame {
@@ -46,6 +49,7 @@ impl Frame {
             buf,
             page_owner: None,
             is_downgrading: AtomicBool::new(false),
+            is_dirty: AtomicBool::new(false),
         }
     }
 

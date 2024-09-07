@@ -217,6 +217,11 @@ impl PageHandle {
         // Otherwise we need to load the page into memory.
         self.load(&mut write_guard)?;
 
+        // mark the frame as dirty
+        if let Some(frame) = write_guard.deref() {
+            frame.is_dirty.store(true, Ordering::Release);
+        }
+
         Ok(WritePageGuard::new(self.page.pid, write_guard))
     }
 
@@ -247,6 +252,11 @@ impl PageHandle {
         // Otherwise we need to load the page into memory.
         self.load(&mut write_guard)?;
 
+        // mark the frame as dirty
+        if let Some(frame) = write_guard.deref() {
+            frame.is_dirty.store(true, Ordering::Release);
+        }
+
         Ok(Some(WritePageGuard::new(self.page.pid, write_guard)))
     }
 
@@ -274,6 +284,9 @@ impl PageHandle {
 
         // Read the data in from persistent storage via the storage manager handle.
         let frame = self.sm.read_into(self.page.pid, frame)?;
+
+        // mark the frame as not dirty
+        frame.is_dirty.store(false, Ordering::Release);
 
         self.page.is_loaded.store(true, Ordering::Release);
         frame.record_access(self.page.clone());

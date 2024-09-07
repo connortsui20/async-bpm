@@ -2,7 +2,6 @@ use async_bpm::{
     page::{PageId, PAGE_SIZE},
     BufferPoolManager,
 };
-use core_affinity::CoreId;
 use rand::distributions::Bernoulli;
 use rand::{distributions::Distribution, Rng};
 use std::sync::Barrier;
@@ -62,11 +61,9 @@ fn throughput<const ZIPF: bool>() {
 
     thread::scope(|s| {
         // Spawn all threads with tasks on them.
-        for thread in 0..THREADS {
+        for _thread in 0..THREADS {
             let barrier = barrier.clone();
             s.spawn(move || {
-                let core_id = CoreId { id: thread };
-
                 // Spawn all of the tasks lazily.
                 spawn_bench_task::<ZIPF>(barrier.clone());
             });
