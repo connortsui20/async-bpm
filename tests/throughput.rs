@@ -1,9 +1,8 @@
 use async_bpm::{
     page::{PageId, PAGE_SIZE},
-    BufferPoolManager,
+    BufferPoolManager, IO_OPERATIONS,
 };
-use rand::distributions::Bernoulli;
-use rand::{distributions::Distribution, Rng};
+use rand::{distributions::Distribution, thread_rng, Rng};
 use std::sync::Barrier;
 use std::{
     ops::{Deref, DerefMut},
@@ -18,72 +17,81 @@ use zipf::ZipfDistribution;
 const GIGABYTE: usize = 1024 * 1024 * 1024;
 const GIGABYTE_PAGES: usize = GIGABYTE / PAGE_SIZE;
 
-const THREADS: usize = 8;
-// const TASKS: usize = 128; // tasks per thread
-const OPERATIONS: usize = 1 << 24;
+const GET_THREADS: usize = 32;
+const SCAN_THREADS: usize = 96;
+const OPERATIONS: usize = 1 << 26;
 
-const THREAD_OPERATIONS: usize = OPERATIONS / THREADS;
-const ITERATIONS: usize = THREAD_OPERATIONS; // iterations per task
+const ITERATIONS: usize = OPERATIONS / GET_THREADS; // iterations per get trhead
 
 const FRAMES: usize = GIGABYTE_PAGES;
 const STORAGE_PAGES: usize = 32 * GIGABYTE_PAGES;
 
-/// The 30% was taken from the Redshift paper "Why TPC Is Not Enough", Table 2.
-const WRITE_RATIO: f64 = 30.0 / 100.0;
 const ZIPF_EXP: f64 = 1.1;
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
-
-#[test]
-#[ignore]
-fn bench_random() {
-    throughput::<false>();
-}
-
-#[test]
-#[ignore]
-fn bench_zipf() {
-    throughput::<true>();
-}
+static SCAN_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 /// Spawns a constant number of threads and schedules a constant number of tasks on each of them,
 /// with each task containing a constant number of read/write operations.
 ///
 /// See [`spawn_bench_task`] for more information.
-fn throughput<const ZIPF: bool>() {
+#[test]
+#[ignore]
+fn throughput() {
     BufferPoolManager::initialize(FRAMES, STORAGE_PAGES);
 
-    COUNTER.store(0, Ordering::Release);
-    println!("Operations: {OPERATIONS}");
-
     let start = std::time::Instant::now();
-    let barrier = Arc::new(Barrier::new(THREADS));
+    let barrier = Arc::new(Barrier::new(GET_THREADS + SCAN_THREADS));
 
     thread::scope(|s| {
         // Spawn all threads with tasks on them.
-        for _thread in 0..THREADS {
+        for _thread in 0..GET_THREADS {
             let barrier = barrier.clone();
             s.spawn(move || {
-                // Spawn all of the tasks lazily.
-                spawn_bench_task::<ZIPF>(barrier.clone());
+                spawn_bench_task(barrier.clone());
+            });
+        }
+
+        for _thread in 0..SCAN_THREADS {
+            let barrier = barrier.clone();
+            s.spawn(move || {
+                spawn_scan_task(barrier.clone());
             });
         }
 
         // Spawn a counter thread that reports metrics every second.
         s.spawn(move || {
             let second = std::time::Duration::from_secs(1);
-            let mut counter = 0;
+            let mut get_counter = 0;
+            let mut scan_counter = 0;
+            let mut io_counter = 0;
 
             // Only start counting once the first operation has occured.
             while COUNTER.load(Ordering::Acquire) == 0 {
                 std::hint::spin_loop();
             }
 
-            while counter < THREADS * ITERATIONS {
-                let prev = counter;
-                counter = COUNTER.load(Ordering::Acquire);
+            while get_counter < GET_THREADS * ITERATIONS {
+                let prev_get = get_counter;
+                let prev_scan = scan_counter;
+                let prev_io = io_counter;
 
-                println!("Operations per second: {}", counter - prev);
+                get_counter = COUNTER.load(Ordering::Acquire);
+                scan_counter = SCAN_COUNTER.load(Ordering::Acquire);
+                io_counter = IO_OPERATIONS.load(Ordering::Acquire);
+
+                let get_ops = get_counter - prev_get;
+                let scan_ops = scan_counter - prev_scan;
+                let io_ops = io_counter - prev_io;
+
+                println!(
+                    "gets: {}\t\tscans: {}\t\ttotal: {}\t\tios: {}",
+                    get_ops,
+                    scan_ops,
+                    get_ops + scan_ops,
+                    io_ops
+                );
+
                 std::thread::sleep(second);
             }
 
@@ -95,26 +103,21 @@ fn throughput<const ZIPF: bool>() {
         });
     });
 
-    assert_eq!(COUNTER.load(Ordering::SeqCst), THREADS * ITERATIONS);
+    assert_eq!(COUNTER.load(Ordering::SeqCst), GET_THREADS * ITERATIONS);
 }
 
-fn spawn_bench_task<const ZIPF: bool>(barrier: Arc<Barrier>) {
+fn spawn_bench_task(barrier: Arc<Barrier>) {
     let bpm = BufferPoolManager::get();
 
     let zipf = ZipfDistribution::new(STORAGE_PAGES, ZIPF_EXP).unwrap();
-    let coin = Bernoulli::new(WRITE_RATIO).unwrap();
     let mut rng = rand::thread_rng();
 
     let mut handles = Vec::with_capacity(ITERATIONS);
 
     for _ in 0..ITERATIONS {
-        let id = if ZIPF {
-            zipf.sample(&mut rng)
-        } else {
-            rng.gen_range(0..STORAGE_PAGES)
-        } as u64;
+        let id = zipf.sample(&mut rng);
 
-        let pid = PageId::new(id);
+        let pid = PageId::new(id as u64);
         let ph = bpm.get_page(&pid).unwrap();
 
         handles.push(ph);
@@ -122,19 +125,34 @@ fn spawn_bench_task<const ZIPF: bool>(barrier: Arc<Barrier>) {
 
     // Wait for all tasks to finish setup.
     barrier.wait();
-    println!("Setup Completed");
 
     for ph in handles {
-        if coin.sample(&mut rng) {
-            let mut write_guard = ph.write().unwrap();
-            write_guard.deref_mut().fill(b'a');
-            write_guard.flush().unwrap();
-        } else {
+        let mut write_guard = ph.write().unwrap();
+        write_guard.deref_mut().fill(b'a');
+        write_guard.flush().unwrap();
+
+        COUNTER.fetch_add(1, Ordering::Release);
+    }
+}
+
+fn spawn_scan_task(barrier: Arc<Barrier>) {
+    let bpm = BufferPoolManager::get();
+
+    barrier.wait();
+
+    let mut rng = thread_rng();
+    let start = rng.gen_range(0..STORAGE_PAGES);
+
+    // Continuously scan all pages.
+    loop {
+        for i in 0..STORAGE_PAGES / 2 {
+            let pid = PageId::new(((i + start) % STORAGE_PAGES) as u64);
+            let ph = bpm.get_page(&pid).unwrap();
             let read_guard = ph.read().unwrap();
             let slice = read_guard.deref();
             std::hint::black_box(slice);
-        }
 
-        COUNTER.fetch_add(1, Ordering::Release);
+            SCAN_COUNTER.fetch_add(1, Ordering::Release);
+        }
     }
 }

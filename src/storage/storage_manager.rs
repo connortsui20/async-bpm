@@ -17,6 +17,7 @@ use std::ops::Deref;
 use std::os::fd::AsRawFd;
 use std::os::unix::prelude::FileExt;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{LazyLock, OnceLock};
 
 /// TODO refactor this out
@@ -24,6 +25,9 @@ pub const DATABASE_NAME: &str = "test.db";
 
 /// The global storage manager instance.
 pub(crate) static STORAGE_MANAGER: OnceLock<StorageManager> = OnceLock::new();
+
+/// The total number of I/O operations.
+pub static IO_OPERATIONS: AtomicUsize = AtomicUsize::new(0);
 
 std::thread_local! {
     static DB_FILE: LazyLock<Rc<File>> = LazyLock::new(|| {
@@ -139,12 +143,10 @@ impl StorageManagerHandle {
     /// On any sort of error, we still need to return the `Frame` back to the caller, so both the
     /// `Ok` and `Err` cases return the frame back.
     pub(crate) fn read_into(&self, pid: PageId, frame: Frame) -> Result<Frame> {
+        IO_OPERATIONS.fetch_add(1, Ordering::Relaxed);
         match self.file.read_exact_at(frame.buf, pid.offset()) {
             Ok(_) => Ok(frame),
-            Err(e) => {
-                println!("{}", e);
-                Err(e)
-            }
+            Err(e) => Err(e),
         }
     }
 
@@ -162,6 +164,7 @@ impl StorageManagerHandle {
     /// On any sort of error, we still need to return the `Frame` back to the caller, so both the
     /// `Ok` and `Err` cases return the frame back.
     pub(crate) fn write_from(&self, pid: PageId, frame: Frame) -> Result<Frame> {
+        IO_OPERATIONS.fetch_add(1, Ordering::Relaxed);
         match self.file.write_at(frame.buf, pid.offset()) {
             Ok(_) => Ok(frame),
             Err(e) => Err(e),
