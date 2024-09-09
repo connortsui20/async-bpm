@@ -15,3 +15,5 @@ mod storage_manager;
 pub(crate) use frame::*;
 pub(crate) use frame_group::*;
 pub(crate) use storage_manager::*;
+
+pub use storage_manager::IO_OPERATIONS;

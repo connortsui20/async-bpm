@@ -13,6 +13,7 @@ use crate::page::PAGE_SIZE;
 use crate::{page::PageId, storage::frame::Frame};
 use std::io::Result;
 use std::ops::Deref;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::LazyLock;
 use std::{rc::Rc, sync::OnceLock};
 use tokio_uring::fs::File;
@@ -23,6 +24,9 @@ pub const DATABASE_NAME: &str = "bpm.db";
 
 /// The global storage manager instance.
 pub(crate) static STORAGE_MANAGER: OnceLock<StorageManager> = OnceLock::new();
+
+/// The total number of I/O operations.
+pub static IO_OPERATIONS: AtomicUsize = AtomicUsize::new(0);
 
 std::thread_local! {
     static DB_FILE: LazyLock<Rc<File>> = LazyLock::new(|| {
@@ -120,6 +124,7 @@ impl StorageManagerHandle {
     /// On any sort of error, we still need to return the `Frame` back to the caller, so both the
     /// `Ok` and `Err` cases return the frame back.
     pub(crate) async fn read_into(&self, pid: PageId, frame: Frame) -> BufResult<(), Frame> {
+        IO_OPERATIONS.fetch_add(1, Ordering::Relaxed);
         self.file.read_exact_at(frame, pid.offset()).await
     }
 
@@ -137,6 +142,7 @@ impl StorageManagerHandle {
     /// On any sort of error, we still need to return the `Frame` back to the caller, so both the
     /// `Ok` and `Err` cases return the frame back.
     pub(crate) async fn write_from(&self, pid: PageId, frame: Frame) -> BufResult<(), Frame> {
+        IO_OPERATIONS.fetch_add(1, Ordering::Relaxed);
         self.file.write_all_at(frame, pid.offset()).await
     }
 }

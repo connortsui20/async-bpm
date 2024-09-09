@@ -11,3 +11,5 @@ pub mod page;
 pub(crate) mod storage;
 
 pub use bpm::BufferPoolManager;
+
+pub use storage::IO_OPERATIONS;
