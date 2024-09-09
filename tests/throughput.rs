@@ -84,13 +84,7 @@ fn throughput() {
                 let scan_ops = scan_counter - prev_scan;
                 let io_ops = io_counter - prev_io;
 
-                println!(
-                    "gets: {}\t\tscans: {}\t\ttotal: {}\t\tios: {}",
-                    get_ops,
-                    scan_ops,
-                    get_ops + scan_ops,
-                    io_ops
-                );
+                println!("{},{},{},{}", get_ops, scan_ops, get_ops + scan_ops, io_ops);
 
                 std::thread::sleep(second);
             }
