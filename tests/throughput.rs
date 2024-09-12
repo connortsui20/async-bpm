@@ -25,14 +25,21 @@ const GIGABYTE: usize = 1024 * 1024 * 1024;
 const GIGABYTE_PAGES: usize = GIGABYTE / PAGE_SIZE;
 
 const FIND_TASKS: usize = 32;
-const FIND_THREADS: usize = 8;
+const FIND_THREADS: usize = 4;
 const FIND_TASKS_PER_THREAD: usize = FIND_TASKS / FIND_THREADS;
 
 const SCAN_TASKS: usize = 96;
-const SCAN_THREADS: usize = 24;
+const SCAN_THREADS: usize = 4;
 const SCAN_TASKS_PER_THREAD: usize = SCAN_TASKS / SCAN_THREADS;
 
+const TOTAL_TASKS: usize =
+    (if WRITE { FIND_TASKS } else { 0 }) + (if READ { SCAN_TASKS } else { 0 });
+
+const TOTAL_THREADS: usize =
+    (if WRITE { FIND_THREADS } else { 0 }) + (if READ { SCAN_THREADS } else { 0 });
+
 const RANDOM_OPERATIONS: usize = 1 << 24;
+
 const TASK_ACCESSES: usize = RANDOM_OPERATIONS / FIND_TASKS;
 
 const FRAMES: usize = GIGABYTE_PAGES;
@@ -42,6 +49,9 @@ const ZIPF_EXP: f64 = 1.1;
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 static SCAN_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+const WRITE: bool = true;
+const READ: bool = true;
 
 /// Spawns a constant number of threads and schedules a constant number of tasks on each of them,
 /// with each task containing a constant number of read/write operations.
@@ -53,64 +63,71 @@ fn throughput() {
     BufferPoolManager::initialize(FRAMES, STORAGE_PAGES);
 
     let start = std::time::Instant::now();
-    let barrier = Arc::new(Barrier::new(FIND_TASKS + SCAN_TASKS));
+    let barrier = Arc::new(Barrier::new(TOTAL_TASKS));
 
     thread::scope(|s| {
         // Spawn all get threads with tasks on them.
-        for thread in 0..FIND_THREADS {
-            let barrier = barrier.clone();
-            s.spawn(move || {
-                let core_id = CoreId { id: thread };
-                assert!(core_affinity::set_for_current(core_id));
+        if WRITE {
+            for thread in 0..FIND_THREADS {
+                let barrier = barrier.clone();
+                s.spawn(move || {
+                    let core_id = CoreId { id: thread };
+                    assert!(core_affinity::set_for_current(core_id));
 
-                BufferPoolManager::start_thread(async move {
-                    // Spawn all of the tasks lazily.
-                    let mut set = JoinSet::new();
-                    for _task in 0..FIND_TASKS_PER_THREAD {
-                        let handle = spawn_bench_task(barrier.clone());
-                        set.spawn(handle);
-                    }
+                    BufferPoolManager::start_thread(async move {
+                        // Spawn all of the tasks lazily.
+                        let mut set = JoinSet::new();
+                        for _task in 0..FIND_TASKS_PER_THREAD {
+                            let handle = spawn_find_task(barrier.clone());
+                            set.spawn(handle);
+                        }
 
-                    // Execute all tasks concurrently.
-                    while let Some(res) = set.join_next().await {
-                        let inner_res = res.unwrap();
-                        inner_res.unwrap();
-                    }
+                        // Execute all tasks concurrently.
+                        while let Some(res) = set.join_next().await {
+                            let inner_res = res.unwrap();
+                            inner_res.unwrap();
+                        }
+                    });
                 });
-            });
+            }
         }
 
         // Spawn all scan threads with tasks on them.
-        for scan_thread in 0..SCAN_THREADS {
-            let barrier = barrier.clone();
-            s.spawn(move || {
-                let core_id = CoreId {
-                    id: FIND_THREADS + scan_thread,
-                };
-                assert!(core_affinity::set_for_current(core_id));
+        if READ {
+            for scan_thread in 0..SCAN_THREADS {
+                let barrier = barrier.clone();
+                s.spawn(move || {
+                    let id = if WRITE {
+                        FIND_THREADS + scan_thread
+                    } else {
+                        scan_thread
+                    };
+                    let core_id = CoreId { id };
+                    assert!(core_affinity::set_for_current(core_id));
 
-                BufferPoolManager::start_thread(async move {
-                    // Spawn all of the tasks lazily.
-                    let mut set = JoinSet::new();
-                    for _task in 0..SCAN_TASKS_PER_THREAD {
-                        let handle = spawn_scan_task(barrier.clone());
-                        set.spawn(handle);
-                    }
+                    BufferPoolManager::start_thread(async move {
+                        // Spawn all of the tasks lazily.
+                        let mut set = JoinSet::new();
+                        for _task in 0..SCAN_TASKS_PER_THREAD {
+                            let handle = spawn_scan_task(barrier.clone());
+                            set.spawn(handle);
+                        }
 
-                    // Execute all tasks concurrently.
-                    while let Some(res) = set.join_next().await {
-                        let inner_res = res.unwrap();
-                        inner_res.unwrap();
-                    }
-                })
-            });
+                        // Execute all tasks concurrently.
+                        while let Some(res) = set.join_next().await {
+                            let inner_res = res.unwrap();
+                            inner_res.unwrap();
+                        }
+                    })
+                });
+            }
         }
 
         // Spawn a counter thread that reports metrics every second.
         s.spawn(move || {
             // Will unfortunately be pinned to one of the scan threads.
             let core_id = CoreId {
-                id: FIND_THREADS + SCAN_THREADS - 1,
+                id: TOTAL_THREADS - 1,
             };
             assert!(core_affinity::set_for_current(core_id));
 
@@ -119,9 +136,10 @@ fn throughput() {
             let mut scan_counter = 0;
             let mut io_counter = 0;
 
-            // Only start counting once the first operation has occured.
-            while COUNTER.load(Ordering::Acquire) == 0 {
-                std::hint::spin_loop();
+            if WRITE {
+                while COUNTER.load(Ordering::Relaxed) == 0 {
+                    std::hint::spin_loop();
+                }
             }
 
             for _ in 0..SECONDS {
@@ -151,7 +169,7 @@ fn throughput() {
     });
 }
 
-fn spawn_bench_task(barrier: Arc<Barrier>) -> JoinHandle<()> {
+fn spawn_find_task(barrier: Arc<Barrier>) -> JoinHandle<()> {
     let bpm = BufferPoolManager::get();
 
     // Since half of the threads are solely reading, we double the writers here.
