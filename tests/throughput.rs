@@ -14,14 +14,16 @@ use std::{
 };
 use zipf::ZipfDistribution;
 
+const SECONDS: usize = 30;
+
 const GIGABYTE: usize = 1024 * 1024 * 1024;
 const GIGABYTE_PAGES: usize = GIGABYTE / PAGE_SIZE;
 
-const GET_THREADS: usize = 32;
+const FIND_THREADS: usize = 32;
 const SCAN_THREADS: usize = 96;
-const OPERATIONS: usize = 1 << 23;
 
-const ITERATIONS: usize = OPERATIONS / GET_THREADS; // iterations per get trhead
+const RANDOM_OPERATIONS: usize = 1 << 24;
+const TASK_ACCESSES: usize = RANDOM_OPERATIONS / FIND_THREADS;
 
 const FRAMES: usize = GIGABYTE_PAGES;
 const STORAGE_PAGES: usize = 32 * GIGABYTE_PAGES;
@@ -41,11 +43,11 @@ fn throughput() {
     BufferPoolManager::initialize(FRAMES, STORAGE_PAGES);
 
     let start = std::time::Instant::now();
-    let barrier = Arc::new(Barrier::new(GET_THREADS + SCAN_THREADS));
+    let barrier = Arc::new(Barrier::new(FIND_THREADS + SCAN_THREADS));
 
     thread::scope(|s| {
         // Spawn all threads with tasks on them.
-        for _thread in 0..GET_THREADS {
+        for _thread in 0..FIND_THREADS {
             let barrier = barrier.clone();
             s.spawn(move || {
                 spawn_bench_task(barrier.clone());
@@ -71,7 +73,7 @@ fn throughput() {
                 std::hint::spin_loop();
             }
 
-            while get_counter < GET_THREADS * ITERATIONS {
+            for _ in 0..SECONDS {
                 let prev_get = get_counter;
                 let prev_scan = scan_counter;
                 let prev_io = io_counter;
@@ -84,7 +86,7 @@ fn throughput() {
                 let scan_ops = scan_counter - prev_scan;
                 let io_ops = io_counter - prev_io;
 
-                println!("{},{},{},{}", get_ops, scan_ops, get_ops + scan_ops, io_ops);
+                println!("{},{},{}", get_ops, scan_ops, io_ops);
 
                 std::thread::sleep(second);
             }
@@ -96,8 +98,6 @@ fn throughput() {
             std::process::exit(0);
         });
     });
-
-    assert_eq!(COUNTER.load(Ordering::SeqCst), GET_THREADS * ITERATIONS);
 }
 
 fn spawn_bench_task(barrier: Arc<Barrier>) {
@@ -106,9 +106,9 @@ fn spawn_bench_task(barrier: Arc<Barrier>) {
     let zipf = ZipfDistribution::new(STORAGE_PAGES, ZIPF_EXP).unwrap();
     let mut rng = rand::thread_rng();
 
-    let mut handles = Vec::with_capacity(ITERATIONS);
+    let mut handles = Vec::with_capacity(TASK_ACCESSES);
 
-    for _ in 0..ITERATIONS {
+    for _ in 0..TASK_ACCESSES {
         let id = zipf.sample(&mut rng);
 
         let pid = PageId::new(id as u64);

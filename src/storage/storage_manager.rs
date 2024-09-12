@@ -9,12 +9,10 @@
 //! this buffer pool manager will operate at its best when given access to several NVMe SSDs, all
 //! attached via PCIe lanes.
 
-use crate::page::PAGE_SIZE;
 use crate::{page::PageId, storage::frame::Frame};
 use std::fs::File;
 use std::io::Result;
 use std::ops::Deref;
-use std::os::fd::AsRawFd;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::prelude::FileExt;
 use std::rc::Rc;
@@ -22,7 +20,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{LazyLock, OnceLock};
 
 /// TODO refactor this out
-pub const DATABASE_NAME: &str = "test.db";
+pub const DATABASE_NAME: &str = "bpm.db";
 
 /// The global storage manager instance.
 pub(crate) static STORAGE_MANAGER: OnceLock<StorageManager> = OnceLock::new();
@@ -56,18 +54,18 @@ impl StorageManager {
     /// # Panics
     ///
     /// Panics on I/O errors, or if this function is called a second time after a successful return.
-    pub(crate) fn initialize(capacity: usize) {
-        let _ = std::fs::remove_file(DATABASE_NAME);
+    pub(crate) fn initialize(_capacity: usize) {
+        // let _ = std::fs::remove_file(DATABASE_NAME);
 
-        let file = File::create(DATABASE_NAME).expect("Couldn't create file");
-        let fd = file.as_raw_fd();
+        // let file = File::create(DATABASE_NAME).expect("Couldn't create file");
+        // let fd = file.as_raw_fd();
 
         // file.fallocate(0, (capacity * PAGE_SIZE) as u64, 0);
         // SAFETY: this is safe because its just s
-        unsafe {
-            // libc::fallocate(fd, 0, (capacity * PAGE_SIZE) as u64, 4096);
-            libc::ftruncate(fd, (capacity * PAGE_SIZE) as i64);
-        }
+        // unsafe {
+        //     // libc::fallocate(fd, 0, (capacity * PAGE_SIZE) as u64, 4096);
+        //     libc::ftruncate(fd, (capacity * PAGE_SIZE) as i64);
+        // }
 
         let sm = Self {
             // file: Arc::new(file),
