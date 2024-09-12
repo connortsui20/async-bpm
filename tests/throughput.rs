@@ -19,7 +19,7 @@ const GIGABYTE_PAGES: usize = GIGABYTE / PAGE_SIZE;
 
 const GET_THREADS: usize = 32;
 const SCAN_THREADS: usize = 96;
-const OPERATIONS: usize = 1 << 26;
+const OPERATIONS: usize = 1 << 25;
 
 const ITERATIONS: usize = OPERATIONS / GET_THREADS; // iterations per get trhead
 
