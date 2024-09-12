@@ -15,6 +15,7 @@ use std::fs::File;
 use std::io::Result;
 use std::ops::Deref;
 use std::os::fd::AsRawFd;
+use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::prelude::FileExt;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -34,6 +35,7 @@ std::thread_local! {
         let std_file = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
+            .custom_flags(libc::O_DIRECT)
             .open(DATABASE_NAME)
             .expect("Thread is unable to create a file handle");
 
