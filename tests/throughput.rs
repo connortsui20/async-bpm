@@ -30,7 +30,7 @@ const SCAN_TASKS: usize = 96;
 const SCAN_THREADS: usize = 24;
 const SCAN_TASKS_PER_THREAD: usize = SCAN_TASKS / SCAN_THREADS;
 
-const OPERATIONS: usize = 1 << 26;
+const OPERATIONS: usize = 1 << 25;
 const THREAD_OPERATIONS: usize = OPERATIONS / GET_THREADS;
 const ITERATIONS: usize = THREAD_OPERATIONS / GET_TASKS_PER_THREAD; // iterations per task
 
