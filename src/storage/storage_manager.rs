@@ -9,7 +9,6 @@
 //! this buffer pool manager will operate at its best when given access to several NVMe SSDs, all
 //! attached via PCIe lanes.
 
-use crate::page::PAGE_SIZE;
 use crate::{page::PageId, storage::frame::Frame};
 use std::io::Result;
 use std::ops::Deref;
@@ -53,7 +52,7 @@ impl StorageManager {
     /// # Panics
     ///
     /// Panics on I/O errors, or if this function is called a second time after a successful return.
-    pub(crate) fn initialize(capacity: usize) {
+    pub(crate) fn initialize(_capacity: usize) {
         tokio_uring::start(async {
             // let _ = tokio_uring::fs::remove_file(DATABASE_NAME).await;
 

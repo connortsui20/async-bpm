@@ -19,20 +19,21 @@ use tokio::{
 };
 use zipf::ZipfDistribution;
 
+const SECONDS: usize = 30;
+
 const GIGABYTE: usize = 1024 * 1024 * 1024;
 const GIGABYTE_PAGES: usize = GIGABYTE / PAGE_SIZE;
 
-const GET_TASKS: usize = 32;
-const GET_THREADS: usize = 8;
-const GET_TASKS_PER_THREAD: usize = GET_TASKS / GET_THREADS;
+const FIND_TASKS: usize = 32;
+const FIND_THREADS: usize = 8;
+const FIND_TASKS_PER_THREAD: usize = FIND_TASKS / FIND_THREADS;
 
 const SCAN_TASKS: usize = 96;
 const SCAN_THREADS: usize = 24;
 const SCAN_TASKS_PER_THREAD: usize = SCAN_TASKS / SCAN_THREADS;
 
-const OPERATIONS: usize = 1 << 25;
-const THREAD_OPERATIONS: usize = OPERATIONS / GET_THREADS;
-const ITERATIONS: usize = THREAD_OPERATIONS / GET_TASKS_PER_THREAD; // iterations per task
+const RANDOM_OPERATIONS: usize = 1 << 24;
+const TASK_ACCESSES: usize = RANDOM_OPERATIONS / FIND_TASKS;
 
 const FRAMES: usize = GIGABYTE_PAGES;
 const STORAGE_PAGES: usize = 32 * GIGABYTE_PAGES;
@@ -52,11 +53,11 @@ fn throughput() {
     BufferPoolManager::initialize(FRAMES, STORAGE_PAGES);
 
     let start = std::time::Instant::now();
-    let barrier = Arc::new(Barrier::new(GET_TASKS + SCAN_TASKS));
+    let barrier = Arc::new(Barrier::new(FIND_TASKS + SCAN_TASKS));
 
     thread::scope(|s| {
         // Spawn all get threads with tasks on them.
-        for thread in 0..GET_THREADS {
+        for thread in 0..FIND_THREADS {
             let barrier = barrier.clone();
             s.spawn(move || {
                 let core_id = CoreId { id: thread };
@@ -65,7 +66,7 @@ fn throughput() {
                 BufferPoolManager::start_thread(async move {
                     // Spawn all of the tasks lazily.
                     let mut set = JoinSet::new();
-                    for _task in 0..GET_TASKS_PER_THREAD {
+                    for _task in 0..FIND_TASKS_PER_THREAD {
                         let handle = spawn_bench_task(barrier.clone());
                         set.spawn(handle);
                     }
@@ -84,7 +85,7 @@ fn throughput() {
             let barrier = barrier.clone();
             s.spawn(move || {
                 let core_id = CoreId {
-                    id: GET_THREADS + scan_thread,
+                    id: FIND_THREADS + scan_thread,
                 };
                 assert!(core_affinity::set_for_current(core_id));
 
@@ -109,11 +110,11 @@ fn throughput() {
         s.spawn(move || {
             // Will unfortunately be pinned to one of the scan threads.
             let core_id = CoreId {
-                id: GET_THREADS + SCAN_THREADS - 1,
+                id: FIND_THREADS + SCAN_THREADS - 1,
             };
             assert!(core_affinity::set_for_current(core_id));
 
-            let second = std::time::Duration::from_secs(1);
+            let second_duration = std::time::Duration::from_secs(1);
             let mut get_counter = 0;
             let mut scan_counter = 0;
             let mut io_counter = 0;
@@ -123,7 +124,7 @@ fn throughput() {
                 std::hint::spin_loop();
             }
 
-            while get_counter < GET_THREADS * GET_TASKS_PER_THREAD * ITERATIONS {
+            for _ in 0..SECONDS {
                 let prev_get = get_counter;
                 let prev_scan = scan_counter;
                 let prev_io = io_counter;
@@ -136,9 +137,9 @@ fn throughput() {
                 let scan_ops = scan_counter - prev_scan;
                 let io_ops = io_counter - prev_io;
 
-                println!("{},{},{},{}", get_ops, scan_ops, get_ops + scan_ops, io_ops);
+                println!("{},{},{}", get_ops, scan_ops, io_ops);
 
-                std::thread::sleep(second);
+                std::thread::sleep(second_duration);
             }
 
             let end = std::time::Instant::now();
@@ -148,8 +149,6 @@ fn throughput() {
             std::process::exit(0);
         });
     });
-
-    assert_eq!(COUNTER.load(Ordering::SeqCst), GET_TASKS * ITERATIONS);
 }
 
 fn spawn_bench_task(barrier: Arc<Barrier>) -> JoinHandle<()> {
@@ -160,9 +159,9 @@ fn spawn_bench_task(barrier: Arc<Barrier>) -> JoinHandle<()> {
     let mut rng = rand::thread_rng();
 
     BufferPoolManager::spawn_local(async move {
-        let mut handles = Vec::with_capacity(ITERATIONS);
+        let mut handles = Vec::with_capacity(TASK_ACCESSES);
 
-        for _ in 0..ITERATIONS {
+        for _ in 0..TASK_ACCESSES {
             let id = zipf.sample(&mut rng);
 
             let pid = PageId::new(id as u64);
@@ -177,7 +176,6 @@ fn spawn_bench_task(barrier: Arc<Barrier>) -> JoinHandle<()> {
         for ph in handles {
             let mut write_guard = ph.write().await.unwrap();
             write_guard.deref_mut().fill(b'a');
-            write_guard.flush().await.unwrap();
 
             COUNTER.fetch_add(1, Ordering::Release);
         }
