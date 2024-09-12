@@ -13,6 +13,7 @@ use crate::page::PAGE_SIZE;
 use crate::{page::PageId, storage::frame::Frame};
 use std::io::Result;
 use std::ops::Deref;
+use std::os::unix::fs::OpenOptionsExt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::LazyLock;
 use std::{rc::Rc, sync::OnceLock};
@@ -33,6 +34,7 @@ std::thread_local! {
         let std_file = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
+            .custom_flags(libc::O_DIRECT)
             .open(DATABASE_NAME)
             .expect("Thread is unable to create a file handle");
 
@@ -53,13 +55,13 @@ impl StorageManager {
     /// Panics on I/O errors, or if this function is called a second time after a successful return.
     pub(crate) fn initialize(capacity: usize) {
         tokio_uring::start(async {
-            let _ = tokio_uring::fs::remove_file(DATABASE_NAME).await;
+            // let _ = tokio_uring::fs::remove_file(DATABASE_NAME).await;
 
-            let file = File::create(DATABASE_NAME).await?;
-            file.fallocate(0, (capacity * PAGE_SIZE) as u64, libc::FALLOC_FL_ZERO_RANGE)
-                .await?;
+            // let file = File::create(DATABASE_NAME).await?;
+            // file.fallocate(0, (capacity * PAGE_SIZE) as u64, libc::FALLOC_FL_ZERO_RANGE)
+            //     .await?;
 
-            file.close().await?;
+            // file.close().await?;
             Ok::<(), std::io::Error>(())
         })
         .expect("I/O error on initialization");
