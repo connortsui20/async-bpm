@@ -22,7 +22,11 @@ const GIGABYTE_PAGES: usize = GIGABYTE / PAGE_SIZE;
 const FIND_THREADS: usize = 32;
 const SCAN_THREADS: usize = 96;
 
+const TOTAL_THREADS: usize =
+    (if WRITE { FIND_THREADS } else { 0 }) + (if READ { SCAN_THREADS } else { 0 });
+
 const RANDOM_OPERATIONS: usize = 1 << 24;
+
 const TASK_ACCESSES: usize = RANDOM_OPERATIONS / FIND_THREADS;
 
 const FRAMES: usize = GIGABYTE_PAGES;
@@ -32,6 +36,9 @@ const ZIPF_EXP: f64 = 1.1;
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 static SCAN_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+const WRITE: bool = true;
+const READ: bool = true;
 
 /// Spawns a constant number of threads and schedules a constant number of tasks on each of them,
 /// with each task containing a constant number of read/write operations.
@@ -43,22 +50,26 @@ fn throughput() {
     BufferPoolManager::initialize(FRAMES, STORAGE_PAGES);
 
     let start = std::time::Instant::now();
-    let barrier = Arc::new(Barrier::new(FIND_THREADS + SCAN_THREADS));
+    let barrier = Arc::new(Barrier::new(TOTAL_THREADS));
 
     thread::scope(|s| {
         // Spawn all threads with tasks on them.
-        for _thread in 0..FIND_THREADS {
-            let barrier = barrier.clone();
-            s.spawn(move || {
-                spawn_bench_task(barrier.clone());
-            });
+        if WRITE {
+            for _thread in 0..FIND_THREADS {
+                let barrier = barrier.clone();
+                s.spawn(move || {
+                    spawn_find_task(barrier.clone());
+                });
+            }
         }
 
-        for _thread in 0..SCAN_THREADS {
-            let barrier = barrier.clone();
-            s.spawn(move || {
-                spawn_scan_task(barrier.clone());
-            });
+        if READ {
+            for _thread in 0..SCAN_THREADS {
+                let barrier = barrier.clone();
+                s.spawn(move || {
+                    spawn_scan_task(barrier.clone());
+                });
+            }
         }
 
         // Spawn a counter thread that reports metrics every second.
@@ -69,8 +80,10 @@ fn throughput() {
             let mut io_counter = 0;
 
             // Only start counting once the first operation has occured.
-            while COUNTER.load(Ordering::Acquire) == 0 {
-                std::hint::spin_loop();
+            if WRITE {
+                while COUNTER.load(Ordering::Relaxed) == 0 {
+                    std::hint::spin_loop();
+                }
             }
 
             for _ in 0..SECONDS {
@@ -100,7 +113,7 @@ fn throughput() {
     });
 }
 
-fn spawn_bench_task(barrier: Arc<Barrier>) {
+fn spawn_find_task(barrier: Arc<Barrier>) {
     let bpm = BufferPoolManager::get();
 
     let zipf = ZipfDistribution::new(STORAGE_PAGES, ZIPF_EXP).unwrap();
