@@ -142,7 +142,7 @@ fn throughput() {
                 }
             }
 
-            for _ in 0..SECONDS {
+            for second in 0..SECONDS {
                 let prev_get = get_counter;
                 let prev_scan = scan_counter;
                 let prev_io = io_counter;
@@ -155,7 +155,7 @@ fn throughput() {
                 let scan_ops = scan_counter - prev_scan;
                 let io_ops = io_counter - prev_io;
 
-                println!("{},{},{}", get_ops, scan_ops, io_ops);
+                println!("{},{},{},{}", second, get_ops, scan_ops, io_ops);
 
                 std::thread::sleep(second_duration);
             }
