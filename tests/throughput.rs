@@ -19,17 +19,17 @@ use tokio::{
 };
 use zipf::ZipfDistribution;
 
-const SECONDS: usize = 30;
+const SECONDS: usize = 300;
 
 const GIGABYTE: usize = 1024 * 1024 * 1024;
 const GIGABYTE_PAGES: usize = GIGABYTE / PAGE_SIZE;
 
-const FIND_TASKS: usize = 32;
-const FIND_THREADS: usize = 4;
+const FIND_TASKS: usize = 64;
+const FIND_THREADS: usize = 16;
 const FIND_TASKS_PER_THREAD: usize = FIND_TASKS / FIND_THREADS;
 
-const SCAN_TASKS: usize = 96;
-const SCAN_THREADS: usize = 4;
+const SCAN_TASKS: usize = 256;
+const SCAN_THREADS: usize = 16;
 const SCAN_TASKS_PER_THREAD: usize = SCAN_TASKS / SCAN_THREADS;
 
 const TOTAL_TASKS: usize =
@@ -38,7 +38,7 @@ const TOTAL_TASKS: usize =
 const TOTAL_THREADS: usize =
     (if WRITE { FIND_THREADS } else { 0 }) + (if READ { SCAN_THREADS } else { 0 });
 
-const RANDOM_OPERATIONS: usize = 1 << 24;
+const RANDOM_OPERATIONS: usize = 1 << 28;
 
 const TASK_ACCESSES: usize = RANDOM_OPERATIONS / FIND_TASKS;
 
@@ -60,6 +60,8 @@ const READ: bool = true;
 #[test]
 #[ignore]
 fn throughput() {
+    println!("Find tasks: {FIND_TASKS}, Find Threads: {FIND_THREADS}, Scan Tasks: {SCAN_TASKS}, Scan Threads: {SCAN_THREADS}");
+
     BufferPoolManager::initialize(FRAMES, STORAGE_PAGES);
 
     let start = std::time::Instant::now();
