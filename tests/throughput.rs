@@ -14,18 +14,18 @@ use std::{
 };
 use zipf::ZipfDistribution;
 
-const SECONDS: usize = 30;
+const SECONDS: usize = 300;
 
 const GIGABYTE: usize = 1024 * 1024 * 1024;
 const GIGABYTE_PAGES: usize = GIGABYTE / PAGE_SIZE;
 
-const FIND_THREADS: usize = 32;
-const SCAN_THREADS: usize = 96;
+const FIND_THREADS: usize = 64;
+const SCAN_THREADS: usize = 256;
 
 const TOTAL_THREADS: usize =
     (if WRITE { FIND_THREADS } else { 0 }) + (if READ { SCAN_THREADS } else { 0 });
 
-const RANDOM_OPERATIONS: usize = 1 << 24;
+const RANDOM_OPERATIONS: usize = 1 << 25;
 
 const TASK_ACCESSES: usize = RANDOM_OPERATIONS / FIND_THREADS;
 
@@ -47,6 +47,8 @@ const READ: bool = true;
 #[test]
 #[ignore]
 fn throughput() {
+    println!("Find Threads: {FIND_THREADS}, Scan Threads: {SCAN_THREADS}");
+
     BufferPoolManager::initialize(FRAMES, STORAGE_PAGES);
 
     let start = std::time::Instant::now();
@@ -74,7 +76,7 @@ fn throughput() {
 
         // Spawn a counter thread that reports metrics every second.
         s.spawn(move || {
-            let second = std::time::Duration::from_secs(1);
+            let second_duration = std::time::Duration::from_secs(1);
             let mut get_counter = 0;
             let mut scan_counter = 0;
             let mut io_counter = 0;
@@ -86,7 +88,7 @@ fn throughput() {
                 }
             }
 
-            for _ in 0..SECONDS {
+            for second in 0..SECONDS {
                 let prev_get = get_counter;
                 let prev_scan = scan_counter;
                 let prev_io = io_counter;
@@ -99,9 +101,9 @@ fn throughput() {
                 let scan_ops = scan_counter - prev_scan;
                 let io_ops = io_counter - prev_io;
 
-                println!("{},{},{}", get_ops, scan_ops, io_ops);
+                println!("{},{},{},{}", second, get_ops, scan_ops, io_ops);
 
-                std::thread::sleep(second);
+                std::thread::sleep(second_duration);
             }
 
             let end = std::time::Instant::now();
