@@ -61,7 +61,7 @@ jobs:
         with:
           reporter: 'github-pr-check'
           github_token: ${{ secrets.GITHUB_TOKEN }}
-  # Don't need a semver check since this is not a public library on crates.io.
+  # # Don't need a semver check since this is not a public library on crates.io.
   # semver:
   #   runs-on: ubuntu-latest
   #   name: semver
