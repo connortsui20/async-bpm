@@ -42,7 +42,7 @@ impl<'a> ReadPageGuard<'a> {
     }
 }
 
-impl<'a> Deref for ReadPageGuard<'a> {
+impl Deref for ReadPageGuard<'_> {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -119,7 +119,7 @@ impl<'a> WritePageGuard<'a> {
     }
 }
 
-impl<'a> Deref for WritePageGuard<'a> {
+impl Deref for WritePageGuard<'_> {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -130,7 +130,7 @@ impl<'a> Deref for WritePageGuard<'a> {
     }
 }
 
-impl<'a> DerefMut for WritePageGuard<'a> {
+impl DerefMut for WritePageGuard<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.guard
             .deref_mut()
