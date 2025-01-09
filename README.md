@@ -12,7 +12,7 @@ buffer pool manager would be implemented.
 Most notable is the fact that I/O is non-blocking, courtesy of the `io_uring` Linux interface that
 the [`tokio_uring`] interface is built on top of. The second most notable part of this system is
 that there is no global page table that users must go through to access any page of data. All page
-data and data movement (eviction) is _decentralized_. 
+data and data movement (eviction) is _decentralized_.
 
 By making use of [`tokio_uring`], this buffer pool manager is implemented with a thread-per-core
 model where many light-weight asynchronous tasks can be scheduled on each operating system provided
@@ -22,6 +22,7 @@ responsibility of the caller to ensure that tasks are balanced between threads.
 # Usage
 
 The intended usage is as follows:
+
 -   Call [`BufferPoolManager::initialize`] to set the memory and storage sizes
 -   Spawn 1 operating system thread for every CPU core
 -   Call [`BufferPoolManager::start_thread`] on each thread to initialize each for the buffer pool
@@ -38,12 +39,12 @@ Here is a simple example of starting the [`BufferPoolManager`] on a single threa
 the main thread). It accesses a single page from persistent storage, fills it with the character
 `'A'`, and then writes it out to persistent storage.
 
-```rust
+```rust,no_run
 use async_bpm::BufferPoolManager;
 use async_bpm::page::PageId;
 use std::ops::DerefMut;
 
-// Initialize a buffer pool with 64 frames and 128 pages on peristent storage.
+// Initialize a buffer pool with 64 frames and 128 pages on persistent storage.
 BufferPoolManager::initialize(64, 128);
 let bpm = BufferPoolManager::get();
 
@@ -71,7 +72,7 @@ necessary, as it is only a way to force an immediate write out to persistent sto
 Here is a multi-threaded example on 8 threads, where each thread spawns 2 tasks that write a
 unique character to persistent storage.
 
-```rust
+```rust,no_run
 use async_bpm::BufferPoolManager;
 use async_bpm::page::PageId;
 use std::ops::DerefMut;
@@ -133,8 +134,8 @@ reason that it is not a multi-threaded worker pool model like the [`tokio`] runt
 the `io_uring` Linux interface works. I/O operations on `io_uring` are submitted to a single
 `io_uring` instance that is registered per-thread to eliminate contention. To move a task to a
 separate thread would mean that the task could no longer poll the operation result off of the
-thread-local `io_uring` completion queue. Thus, lightweight asynchronous tasks given to worker 
-threads cannot be moved between threads (or in other words, are `!Send`). 
+thread-local `io_uring` completion queue. Thus, lightweight asynchronous tasks given to worker
+threads cannot be moved between threads (or in other words, are `!Send`).
 
 A consequence of this fact is that threads cannot work-steal in the same manner that the [`tokio`]
 runtime allows threads to do. It is thus the responsibility of some global scheduler to assign tasks
@@ -142,7 +143,7 @@ to worker threads appropriately. Then, once a task has been given to a worker th
 pool's internal thread-local scheduler (which is just a [`tokio_uring`] local scheduler) is in
 charge of managing all of the cooperative tasks.
 
-This buffer pool manager is heavily inspired by leanstore, which you can read about
+This buffer pool manager is heavily inspired by LeanStore, which you can read about
 [here](https://www.vldb.org/pvldb/vol16/p2090-haas.pdf), and future work could introduce the
 all-to-all model of threads to distinct SSDs, where each worker thread has a dedicated `io_uring`
 instance for every physical SSD.
