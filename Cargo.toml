@@ -19,7 +19,7 @@ zipf = "7.0.0"
 tokio = { version = "1.27.0", features = ["macros", "rt", "sync", "time"] }
 
 # Pin more recent versions for `-Zminimal-versions`.
-bitflags = "1.1.0" # For tokio-uring -> io-uring -> bitflags.
+bitflags = "2.7.0" # For tokio-uring -> io-uring -> bitflags.
 proc-macro2 = "1.0.60" # For a missing feature.
 slab = "0.4.4" # For a missing method.
 
