@@ -19,6 +19,7 @@ use std::sync::{atomic::AtomicBool, Arc, OnceLock};
 use std::{future::Future, io::Result};
 use tokio::sync::RwLock;
 use tokio::task;
+use tracing::{info, instrument, trace};
 
 /// The global buffer pool manager instance.
 static BPM: OnceLock<BufferPoolManager> = OnceLock::new();
@@ -108,8 +109,12 @@ impl BufferPoolManager {
         })
         .expect("Tried to initialize the buffer pool manager more than once");
 
+        info!("`BufferPoolManager` initialized.");
+
         // Also initialize the global `StorageManager` instance.
         StorageManager::initialize(capacity);
+
+        info!("`StorageManager` initialized.");
     }
 
     /// Retrieve a static reference to the global buffer pool manager.
@@ -137,14 +142,17 @@ impl BufferPoolManager {
     ///
     /// If this function is unable to create a [`File`](tokio_uring::fs::File), this function will
     /// raise the I/O error in the form of [`Result`].
+    #[instrument(skip(self), err)]
     pub fn get_page(&self, pid: &PageId) -> Result<PageHandle> {
-        let sm: crate::storage::StorageManagerHandle = StorageManager::get().create_handle()?;
+        let sm = StorageManager::get().create_handle()?;
 
         // Get the page if it exists, otherwise create a new one return that.
         let page = self
             .pages
             .entry(*pid)
             .or_insert_with(|| {
+                trace!("Creating a new `Page`.");
+
                 Arc::new(Page {
                     pid: *pid,
                     is_loaded: AtomicBool::new(false),

@@ -58,6 +58,11 @@ impl Frame {
         }
     }
 
+    /// Gets the unique frame ID of the frame.
+    pub(crate) fn frame_id(&self) -> usize {
+        self.frame_id
+    }
+
     /// Gets the frame group ID of the group that this frame belongs to.
     pub(crate) fn group_id(&self) -> usize {
         self.frame_id / FRAME_GROUP_SIZE

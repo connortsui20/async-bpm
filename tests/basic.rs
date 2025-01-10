@@ -5,6 +5,8 @@ use std::thread;
 #[test]
 #[ignore]
 fn test_single_thread() {
+    tracing_subscriber::fmt::init();
+
     BufferPoolManager::initialize(64, 128);
     let bpm = BufferPoolManager::get();
 
@@ -25,10 +27,12 @@ fn test_single_thread() {
 fn test_basic() {
     const THREADS: usize = 8;
 
+    tracing_subscriber::fmt::init();
+
     BufferPoolManager::initialize(64, 256);
     let bpm = BufferPoolManager::get();
 
-    // Spawn all threads
+    // Spawn all threads.
     thread::scope(|s| {
         for i in 0..THREADS {
             s.spawn(move || {
