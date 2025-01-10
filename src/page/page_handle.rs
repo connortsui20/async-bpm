@@ -15,6 +15,8 @@ use std::ops::Deref;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::sync::RwLockWriteGuard;
+use tracing::field::Empty;
+use tracing::{info, instrument, trace, warn};
 
 /// A thread-local handle to a logical page of data.
 #[derive(Derivative)]
@@ -41,13 +43,18 @@ impl PageHandle {
     /// # Errors
     ///
     /// Raises an error if an I/O error occurs while trying to load the data from disk into memory.
+    #[instrument(skip(self), err, fields(page = ?self.page.pid))]
     pub async fn read(&self) -> Result<ReadPageGuard> {
+        info!("Reading `PageHandle`.");
+
         // Optimization: attempt to read only if we observe that the `is_loaded` flag is set.
         if self.page.is_loaded.load(Ordering::Acquire) {
             let read_guard = self.page.frame.read().await;
+            trace!("`ReadGuard` acquired.");
 
             // If it is already loaded, then we're done.
             if let Some(frame) = read_guard.deref() {
+                trace!("`Page` already loaded.");
                 self.page.is_loaded.store(true, Ordering::Release);
                 frame.record_access(self.page.clone());
                 return Ok(ReadPageGuard::new(self.page.pid, read_guard));
@@ -55,12 +62,15 @@ impl PageHandle {
 
             // Otherwise someone evicted the page underneath us and we need to load the page into
             // memory with a write guard.
+            warn!("`Page` evicted underneath us.");
             drop(read_guard);
         }
 
         let mut write_guard = self.page.frame.write().await;
+        trace!("`WriteGuard` acquired.");
 
         self.load(&mut write_guard).await?;
+        trace!("`Page` loaded.");
 
         Ok(ReadPageGuard::new(self.page.pid, write_guard.downgrade()))
     }
@@ -73,15 +83,21 @@ impl PageHandle {
     /// # Errors
     ///
     /// Raises an error if an I/O error occurs while trying to load the data from disk into memory.
+    #[instrument(skip(self), err, fields(page = ?self.page.pid))]
     pub async fn try_read(&self) -> Result<Option<ReadPageGuard>> {
+        info!("Trying to read `PageHandle`.");
+
         // Optimization: attempt to read only if we observe that the `is_loaded` flag is set.
         if self.page.is_loaded.load(Ordering::Acquire) {
             let Ok(read_guard) = self.page.frame.try_read() else {
+                warn!("Unable to acquire `ReadGuard`.");
                 return Ok(None);
             };
+            trace!("`ReadGuard` acquired.");
 
             // If it is already loaded, then we're done.
             if let Some(frame) = read_guard.deref() {
+                trace!("`Page` already loaded.");
                 self.page.is_loaded.store(true, Ordering::Release);
                 frame.record_access(self.page.clone());
                 return Ok(Some(ReadPageGuard::new(self.page.pid, read_guard)));
@@ -89,12 +105,15 @@ impl PageHandle {
 
             // Otherwise someone evicted the page underneath us and we need to load the page into
             // memory with a write guard.
+            warn!("`Page` evicted underneath us.");
             drop(read_guard);
         }
 
         let mut write_guard = self.page.frame.write().await;
+        trace!("`WriteGuard` acquired.");
 
         self.load(&mut write_guard).await?;
+        trace!("`Page` loaded.");
 
         Ok(Some(ReadPageGuard::new(
             self.page.pid,
@@ -107,11 +126,16 @@ impl PageHandle {
     /// # Errors
     ///
     /// Raises an error if an I/O error occurs while trying to load the data from disk into memory.
+    #[instrument(skip(self), err, fields(page = ?self.page.pid))]
     pub async fn write(&self) -> Result<WritePageGuard> {
+        info!("Writing `PageHandle`.");
+
         let mut write_guard = self.page.frame.write().await;
+        trace!("`WriteGuard` acquired.");
 
         // If it is already loaded, then we're done.
         if let Some(frame) = write_guard.deref() {
+            trace!("`Page` already loaded.");
             self.page.is_loaded.store(true, Ordering::Release);
             frame.record_access(self.page.clone());
             return Ok(WritePageGuard::new(self.page.pid, write_guard));
@@ -119,6 +143,7 @@ impl PageHandle {
 
         // Otherwise we need to load the page into memory.
         self.load(&mut write_guard).await?;
+        trace!("`Page` loaded.");
 
         Ok(WritePageGuard::new(self.page.pid, write_guard))
     }
@@ -131,13 +156,19 @@ impl PageHandle {
     /// # Errors
     ///
     /// Raises an error if an I/O error occurs while trying to load the data from disk into memory.
+    #[instrument(skip(self), err, fields(page = ?self.page.pid))]
     pub async fn try_write(&self) -> Result<Option<WritePageGuard>> {
+        info!("Trying to write `PageHandle`.");
+
         let Ok(mut write_guard) = self.page.frame.try_write() else {
+            warn!("Unable to acquire `WriteGuard`.");
             return Ok(None);
         };
+        trace!("`WriteGuard` acquired.");
 
         // If it is already loaded, then we're done.
         if let Some(frame) = write_guard.deref() {
+            trace!("`Page` already loaded.");
             self.page.is_loaded.store(true, Ordering::Release);
             frame.record_access(self.page.clone());
             return Ok(Some(WritePageGuard::new(self.page.pid, write_guard)));
@@ -145,6 +176,7 @@ impl PageHandle {
 
         // Otherwise we need to load the page into memory.
         self.load(&mut write_guard).await?;
+        trace!("`Page` loaded.");
 
         Ok(Some(WritePageGuard::new(self.page.pid, write_guard)))
     }
@@ -154,9 +186,13 @@ impl PageHandle {
     /// # Errors
     ///
     /// Raises an error if an I/O error occurs while trying to load the data from disk into memory.
+    #[instrument(skip(self), err, fields(page = ?self.page.pid, frame = Empty))]
     async fn load(&self, guard: &mut RwLockWriteGuard<'_, Option<Frame>>) -> Result<()> {
+        info!("Loading `Page` into `Frame`.");
+
         // If someone else got in front of us and loaded the page for us.
         if let Some(frame) = guard.deref().deref() {
+            trace!("Someone loaded the `Page` for us.");
             self.page.is_loaded.store(true, Ordering::Release);
             frame.record_access(self.page.clone());
             return Ok(());
@@ -168,19 +204,24 @@ impl PageHandle {
 
         // Wait for a free frame.
         let mut frame = frame_group.get_free_frame().await?;
+        tracing::Span::current().record("frame", frame.frame_id());
+        trace!("Free `Frame` acquired.");
+
+        // Set the parent page of the acquired frame.
         let none = frame.replace_page_owner(self.page.clone());
-        debug_assert!(none.is_none());
+        assert!(none.is_none());
 
         // Read the data in from persistent storage via the storage manager handle.
         let (res, frame) = self.sm.read_into(self.page.pid, frame).await;
         res?;
+        trace!("`Page` loaded into `Frame`.");
 
         self.page.is_loaded.store(true, Ordering::Release);
         frame.record_access(self.page.clone());
 
         // Give ownership of the frame to the actual page.
         let old: Option<Frame> = guard.replace(frame);
-        debug_assert!(old.is_none());
+        assert!(old.is_none());
 
         Ok(())
     }

@@ -2,7 +2,7 @@
 
 use crate::storage::{Frame, StorageManager};
 use derivative::Derivative;
-use std::{fmt::Display, sync::atomic::AtomicBool};
+use std::{fmt::Debug, fmt::Display, sync::atomic::AtomicBool};
 use tokio::sync::RwLock;
 
 /// The size of a buffer `Frame` / logical [`Page`] of data.
@@ -43,10 +43,16 @@ pub struct Page {
 }
 
 /// A unique identifier for a shared [`Page`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PageId {
     /// Inner representation subject to change...
     inner: u64,
+}
+
+impl Debug for PageId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "p{}", self.inner)
+    }
 }
 
 impl Display for PageId {

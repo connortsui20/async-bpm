@@ -17,6 +17,7 @@ use tokio::{
     sync::Barrier,
     task::{JoinHandle, JoinSet},
 };
+use tracing::info;
 use zipf::ZipfDistribution;
 
 const SECONDS: usize = 300;
@@ -60,7 +61,9 @@ const READ: bool = true;
 #[test]
 #[ignore]
 fn throughput() {
-    println!("Find tasks: {FIND_TASKS}, Find Threads: {FIND_THREADS}, Scan Tasks: {SCAN_TASKS}, Scan Threads: {SCAN_THREADS}");
+    tracing_subscriber::fmt::init();
+
+    info!("Find tasks: {FIND_TASKS}, Find Threads: {FIND_THREADS}, Scan Tasks: {SCAN_TASKS}, Scan Threads: {SCAN_THREADS}");
 
     BufferPoolManager::initialize(FRAMES, STORAGE_PAGES);
 
